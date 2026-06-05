@@ -47,3 +47,5 @@ motor_node:
     publish_rate: 50.0                # 状态话题发布频率（Hz）
     default_speed_rad_s: 3.0          # 默认速度（rad/s）
     zero_tolerance_deg: 0.2           # 回零允许误差（度）
+    zero_file: "/home/wangwenfeng/ros_robot1_ws/src/robot_bringup/config/zero_offsets.json"     #电机零点存储位置
+    

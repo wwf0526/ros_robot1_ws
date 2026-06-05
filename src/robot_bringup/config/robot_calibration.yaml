@@ -1,0 +1,184 @@
+# 连续体机器人标定参数
+# 用于：电机角度 -> 绳长变化 -> PCC状态估计 -> MPC -> RL residual
+
+robot:
+  name: dual_section_tendon_continuum_robot
+  num_sections: 2
+  tendons_per_section: 3
+  num_motors: 6
+
+motor:
+  motor_ids: [1, 2, 3, 4, 5, 6]
+
+  # 1：position_deg 增大表示收绳
+  # -1：position_deg 增大表示放绳
+  sign:
+    1: -1
+    2: -1
+    3: -1
+    4: -1
+    5: -1
+    6: -1
+
+  spool_radius_mm:
+    1: 8.0
+    2: 8.0
+    3: 8.0
+    4: 8.0
+    5: 8.0
+    6: 8.0
+
+  position_limit_deg:
+    1: [-360.0, 360.0]
+    2: [-360.0, 360.0]
+    3: [-360.0, 360.0]
+    4: [-360.0, 360.0]
+    5: [-360.0, 360.0]
+    6: [-360.0, 360.0]
+
+  max_delta_deg_per_step:
+    1: 5.0
+    2: 5.0
+    3: 5.0
+    4: 5.0
+    5: 5.0
+    6: 5.0
+
+tendon:
+  motor_to_tendon:
+    1: 1
+    2: 2
+    3: 3
+    4: 4
+    5: 5
+    6: 6
+
+  zero_length_mm:
+    1: 0.0
+    2: 0.0
+    3: 0.0
+    4: 0.0
+    5: 0.0
+    6: 0.0
+
+  slack_threshold_mm: 1.0
+
+sections:
+  # 第一段：电机 1,3,5；线缆 1,3,5；IMU1
+  section1:
+    motor_ids: [1, 3, 5]
+    tendon_ids: [1, 3, 5]
+    imu: imu1
+    length_mm: 150.0
+    backbone_radius_mm: 10.0
+
+    tendon_angle_deg:
+      1: 0.0
+      3: 120.0
+      5: 240.0
+
+  # 第二段：电机 2,4,6；线缆 2,4,6；IMU2
+  section2:
+    motor_ids: [2, 4, 6]
+    tendon_ids: [2, 4, 6]
+    imu: imu2
+    length_mm: 150.0
+    backbone_radius_mm: 10.0
+
+    tendon_angle_deg:
+      2: 0.0
+      4: 120.0
+      6: 240.0
+
+section_imu_map:
+  section1: imu1
+  section2: imu2
+
+imu:
+  use_imu: true
+
+  imu_topics:
+    imu1: /imu1/data_raw
+    imu2: /imu2/data_raw
+
+  imu_frames:
+    imu1: imu1_link
+    imu2: imu2_link
+
+  mounting_offset_deg:
+    imu1:
+      roll: 0.0
+      pitch: 0.0
+      yaw: 0.0
+    imu2:
+      roll: 0.0
+      pitch: 0.0
+      yaw: 0.0
+
+state_estimation:
+  publish_rate_hz: 50.0
+
+  publish_topics:
+    tendon_state: /continuum/tendon_state
+    continuum_state: /continuum/state
+    safety_state: /continuum/safety_state
+
+  use_pcc_model: true
+  use_imu_correction: true
+  use_slack_detection: true
+
+pcc_model:
+  model_type: quasi_static_pcc
+
+  curvature_gain:
+    section1:
+      kx: 1.0
+      ky: 1.0
+    section2:
+      kx: 1.0
+      ky: 1.0
+
+  residual_enabled: true
+
+mpc:
+  control_rate_hz: 20.0
+  horizon_steps: 10
+  command_type: position_increment
+
+  max_delta_tendon_length_mm: 1.0
+  max_delta_motor_deg: 5.0
+
+  cost_weights:
+    pose_error: 1.0
+    action_smoothness: 0.1
+    tendon_limit: 10.0
+    slack_penalty: 20.0
+
+rl:
+  enabled: false
+  policy_type: residual_policy
+
+  residual_limit_motor_deg: 2.0
+  residual_limit_tendon_mm: 0.5
+
+  input_state:
+    - motor_position_deg
+    - motor_speed_rad_s
+    - tendon_length_mm
+    - imu_orientation
+    - previous_action
+    - slack_flag
+
+  output_action:
+    - residual_delta_motor_deg
+
+safety:
+  enable_limit_check: true
+  enable_slack_check: true
+  enable_estop_check: true
+
+  stop_on_slack: false
+  stop_on_limit: true
+
+  global_motor_position_limit_deg: [-360.0, 360.0]
+  global_speed_limit_rad_s: 10.0
