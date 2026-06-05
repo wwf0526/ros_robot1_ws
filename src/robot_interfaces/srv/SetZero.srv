@@ -1,0 +1,4 @@
+int32[] motor_ids  # 空数组表示全部电机
+---
+bool success
+string message

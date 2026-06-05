@@ -1,0 +1,49 @@
+# IMU 配置部分
+dual_imu_serial_node:
+  ros__parameters:
+    port: /dev/ttyUSB0               # 串口设备号
+    baudrate: 115200                 # 串口波特率
+    publish_rate: 200.0              # 发布频率（Hz）
+    imu1_topic: /imu1/data_raw       # IMU1话题名
+    imu2_topic: /imu2/data_raw       # IMU2话题名
+    imu1_frame_id: imu1_link         # IMU1坐标系
+    imu2_frame_id: imu2_link         # IMU2坐标系
+    status_period: 5.0               # 状态输出周期（秒）
+
+# 电机配置部分(未使用socketcan)
+#motor_node:
+  #ros__parameters:
+    #interface: pcan                   # CAN接口类型，PCAN/USB
+    #primary_channel: PCAN_USBBUS1     # USB-CAN1
+    #secondary_channel: PCAN_USBBUS2   # USB-CAN2
+    #bitrate: 1000000                   # CAN波特率（bps）
+    #feedback_id: 10                     # 电机状态反馈ID
+    #microstep: 32                       # 电机微步设置
+    #timeout: 1.0                        # CAN通讯超时时间（秒）
+    #motor_ids: [1, 2, 3, 4, 5, 6]      # 六台电机编号
+    #secondary_ids: [4, 5, 6]            # 第二路 CAN 的电机
+    #command_topic: /motor/command       # ROS2 控制指令话题
+    #state_topic: /motor/state           # ROS2 电机状态发布话题
+    #publish_rate: 50.0                  # 状态发布频率（Hz）
+    #default_speed_rad_s: 3.0            # 默认运动速度（rad/s）
+    #zero_tolerance_deg: 0.2             # 回零允许误差（度）
+    
+# 电机配置部分(使用socketcan)
+motor_node:
+  ros__parameters:
+    interface: socketcan              # 使用SocketCAN统一接口
+    primary_channel: can0             # 第一条CAN总线（电机1-3）
+    secondary_channel: can1           # 第二条CAN总线（电机4-6）
+    bitrate: 1000000                  # CAN总线波特率
+    feedback_id: 10                   # 电机状态反馈CAN ID
+    microstep: 32                     # 步进电机微步设置
+    timeout: 1.0                      # CAN通讯超时时间（秒）
+    motor_ids: [1, 2, 3, 4, 5, 6]    # 六台电机ID
+    secondary_ids: [4, 5, 6]          # 第二路CAN的电机
+    direction: {1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1}
+    command_topic: /motor/command     # 控制指令ROS2话题
+    command_array_topic: /motor/command_array
+    state_topic: /motor/state         # 电机状态ROS2话题
+    publish_rate: 50.0                # 状态话题发布频率（Hz）
+    default_speed_rad_s: 3.0          # 默认速度（rad/s）
+    zero_tolerance_deg: 0.2           # 回零允许误差（度）

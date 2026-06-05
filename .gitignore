@@ -1,0 +1,13 @@
+build/
+install/
+log/
+
+rosdep_db.tar.gz
+
+*.pyc
+__pycache__/
+
+.vscode/
+.idea/
+*.swp
+*.swo
