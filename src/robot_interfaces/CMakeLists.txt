@@ -13,6 +13,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
     "msg/MotorCommand.msg"
     "msg/MotorState.msg"
     "msg/MotorCommandArray.msg"
+    "msg/TendonState.msg"
     "srv/SetZero.srv"
     "srv/HomeMotors.srv"
     "srv/EmergencyStop.srv"
