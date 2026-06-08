@@ -14,6 +14,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
     "msg/MotorState.msg"
     "msg/MotorCommandArray.msg"
     "msg/TendonState.msg"
+    "msg/ContinuumState.msg"
+    "msg/ZeroCheckState.msg"
     "srv/SetZero.srv"
     "srv/HomeMotors.srv"
     "srv/EmergencyStop.srv"

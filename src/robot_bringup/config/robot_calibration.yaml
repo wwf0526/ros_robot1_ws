@@ -13,12 +13,12 @@ motor:
   # 1：position_deg 增大表示收绳
   # -1：position_deg 增大表示放绳
   sign:
-    1: -1
-    2: -1
-    3: -1
-    4: -1
-    5: -1
-    6: -1
+    1: 1
+    2: 1
+    3: 1
+    4: 1
+    5: 1
+    6: 1
 
   spool_radius_mm:
     1: 8.0
@@ -53,12 +53,47 @@ tendon:
     5: 5
     6: 6
 
+  # ===============================
+  # 线缆空间布局（俯视图）
+  #
+  #                绳4        绳5
+  #              (120°)      (60°)
+  #
+  #
+  #       绳3                         绳6
+  #      (180°)                      (0°)
+  #
+  #
+  #               绳2         绳1          
+  #             (240°)      (300°)   
+  #
+  # 相邻线缆夹角 = 60°
+  #
+  # section1（靠近末端）:
+  #   电机1 → 绳1
+  #   电机3 → 绳3
+  #   电机5 → 绳5
+  #   IMU1
+  #
+  # section2（靠近基座）:
+  #   电机2 → 绳2
+  #   电机4 → 绳4
+  #   电机6 → 绳6
+  #   IMU2
+  # ===============================
   zero_length_mm:
     1: 0.0
     2: 0.0
     3: 0.0
     4: 0.0
     5: 0.0
+    6: 0.0
+  angle_deg:
+    1: 300.0
+    2: 240.0
+    3: 180.0
+    4: 120.0
+    5: 60.0
     6: 0.0
 
   slack_threshold_mm: 1.0
@@ -69,26 +104,30 @@ sections:
     motor_ids: [1, 3, 5]
     tendon_ids: [1, 3, 5]
     imu: imu1
-    length_mm: 150.0
-    backbone_radius_mm: 10.0
-
-    tendon_angle_deg:
-      1: 0.0
-      3: 120.0
-      5: 240.0
+    moving_disk_count: 5
+    disk_thickness_mm: 10.0
+    segment_count: 5
+    length_mm: 200.0
+    effective_bending_length_mm: 150.0
+    tendon_radius_mm: 55.0
+    hexagon_inscribed_radius_mm: 70.0
+    equivalent_segment_length_mm: 30.0
+    segment_lengths_mm: [30.0, 30.0, 30.0, 30.0, 30.0]
 
   # 第二段：电机 2,4,6；线缆 2,4,6；IMU2
   section2:
     motor_ids: [2, 4, 6]
     tendon_ids: [2, 4, 6]
     imu: imu2
-    length_mm: 150.0
-    backbone_radius_mm: 10.0
-
-    tendon_angle_deg:
-      2: 0.0
-      4: 120.0
-      6: 240.0
+    moving_disk_count: 5
+    disk_thickness_mm: 10.0
+    segment_count: 5
+    length_mm: 140.0
+    effective_bending_length_mm: 90.0
+    tendon_radius_mm: 55.0
+    hexagon_inscribed_radius_mm: 70.0
+    equivalent_segment_length_mm: 18.0
+    segment_lengths_mm: [13.0, 13.0, 15.0, 24.0, 25.0]
 
 section_imu_map:
   section1: imu1
