@@ -7,6 +7,7 @@ from rclpy.node import Node
 from robot_interfaces.msg import MotorCommand, MotorCommandArray, MotorState
 from .ms42ddc_driver import MS42DDCDriver
 from robot_interfaces.srv import (SetZero, HomeMotors, EmergencyStop, ClearEmergencyStop)
+from std_msgs.msg import Bool
 
 
 class MotorNode(Node):
@@ -123,9 +124,23 @@ class MotorNode(Node):
             self.state_topic,
             10,
         )
+        
+        #创建急停状态发布器
+        self.estop_state_pub = self.create_publisher(
+            Bool,
+            "/motor/emergency_stop_active",
+            10,
+        )
+        
         #创建定时器
         timer_period = 1.0 / self.publish_rate
         self.timer = self.create_timer(timer_period, self.publish_state)
+        
+        #创建急停状态的定时器
+        self.estop_timer = self.create_timer(
+            0.1,
+            self.publish_estop_state,
+        )
 
     #command_callback：单电机命令回调
     def command_callback(self, msg: MotorCommand):
@@ -330,6 +345,10 @@ class MotorNode(Node):
 
         return response
 	
+    def publish_estop_state(self):
+        msg = Bool()
+        msg.data = bool(self.estop_active)
+        self.estop_state_pub.publish(msg)
 
     #destroy_node：关闭节点
     def destroy_node(self):

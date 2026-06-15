@@ -136,6 +136,18 @@ section_imu_map:
 imu:
   use_imu: true
 
+#IMU零位补偿
+  mounting_offset_deg:
+    imu1:
+      roll: 0.0
+      pitch: 0.0
+      yaw: 0.0
+
+    imu2:
+      roll: 0.0
+      pitch: 0.0
+      yaw: 0.0
+      
   imu_topics:
     imu1: /imu1/data_raw
     imu2: /imu2/data_raw

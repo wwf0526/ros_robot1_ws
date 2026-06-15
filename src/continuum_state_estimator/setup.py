@@ -26,6 +26,7 @@ setup(
         'console_scripts': [
             'state_estimator_node = continuum_state_estimator.state_estimator_node:main',
             'imu_zero_check_node = continuum_state_estimator.imu_zero_check_node:main',
+            'model_residual_node = continuum_state_estimator.model_residual_node:main',
         ],
     },
 )

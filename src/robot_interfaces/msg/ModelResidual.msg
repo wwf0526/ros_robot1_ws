@@ -1,0 +1,20 @@
+#残差话题参数
+std_msgs/Header header
+
+float32 section1_model_roll
+float32 section1_model_pitch
+float32 section2_model_roll
+float32 section2_model_pitch
+
+float32 section1_imu_roll
+float32 section1_imu_pitch
+float32 section2_imu_roll
+float32 section2_imu_pitch
+
+float32 section1_roll_residual
+float32 section1_pitch_residual
+float32 section2_roll_residual
+float32 section2_pitch_residual
+
+bool residual_valid
+string status
