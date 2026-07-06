@@ -6,6 +6,8 @@ from rclpy.node import Node
 from sensor_msgs.msg import Imu
 from robot_interfaces.msg import MotorState, TendonState, ContinuumState, SafetyState, ModelResidual
 from continuum_model.pcc_model import compute_section_curvature
+from continuum_pccmodel.geometry import load_pcc_geometry_from_cfg
+from continuum_pccmodel.forward_kinematics import forward_kinematics_from_dl_mm
 from std_msgs.msg import Bool
 
 def quaternion_to_euler_deg(x, y, z, w):
@@ -120,7 +122,14 @@ class StateEstimatorNode(Node):
         self.motor_to_tendon = cfg["tendon"]["motor_to_tendon"]
         self.slack_threshold_mm = float(cfg["tendon"]["slack_threshold_mm"])
         self.imu_offset = cfg["imu"]["mounting_offset_deg"]
+        # PCC 正运动学模型参数
+        pcc_cfg = cfg.get("pcc_model", {})
+        self.pcc_enabled = bool(pcc_cfg.get("enabled", False))
+        self.pcc_geometry = load_pcc_geometry_from_cfg(cfg) if self.pcc_enabled else None
 
+        # 真实结构顺序：基座 -> section2 -> section1 -> 末端
+        self.pcc_chain_order = list(pcc_cfg.get("chain_order", ["section2", "section1"]))
+        self.pcc_sections_cfg = pcc_cfg.get("sections", {})
         for mid in self.motor_ids:
             self.motor_position_deg[int(mid)] = 0.0
 
@@ -195,6 +204,129 @@ class StateEstimatorNode(Node):
             tendon_slack[index] = abs(delta_l) < self.slack_threshold_mm
 
         return tendon_length_mm, motor_position_deg, tendon_slack
+
+    def build_pcc_input_from_tendon_lengths(self, tendon_length_mm):
+        """
+        根据 YAML 中的 pcc_model.sections 映射，把真实绳长变化组装成 PCC 模型输入。
+
+        最终 YAML 中：
+            section2: [DL1, DL2, DL3] = [绳4, 绳2, 绳6]
+            section1: [DL1, DL2, DL3] = [绳5, 绳3, 绳1]
+
+        计算顺序由 chain_order 决定：
+            [section2, section1]
+        """
+        dl_sections_mm = []
+        phase_offsets_rad = []
+        dl_by_section = {}
+
+        for section_name in self.pcc_chain_order:
+            section_cfg = self.pcc_sections_cfg[section_name]
+
+            tendon_ids = [int(x) for x in section_cfg["tendon_ids"]]
+            dl_signs = [
+                float(x)
+                for x in section_cfg.get("dl_signs", [1.0] * len(tendon_ids))
+            ]
+
+            if len(tendon_ids) != 3:
+                raise ValueError(f"{section_name} tendon_ids must contain 3 tendons")
+
+            if len(dl_signs) != 3:
+                raise ValueError(f"{section_name} dl_signs must contain 3 values")
+
+            dl_mm = []
+
+            for tendon_id, dl_sign in zip(tendon_ids, dl_signs):
+                # tendon_length_mm 按真实绳号 1~6 存储，所以索引是 tendon_id - 1
+                dl_value_mm = float(tendon_length_mm[tendon_id - 1]) * dl_sign
+                dl_mm.append(dl_value_mm)
+
+            dl_sections_mm.append(dl_mm)
+            phase_offsets_rad.append(float(section_cfg.get("phase_offset_rad", 0.0)))
+            dl_by_section[section_name] = dl_mm
+
+        return dl_sections_mm, phase_offsets_rad, dl_by_section
+
+    def fill_pcc_model_fields(self, msg: ContinuumState, tendon_length_mm):
+        """
+        调用 continuum_pccmodel 正运动学，并把结果写入 ContinuumState 新增字段。
+        """
+        msg.pcc_model_valid = False
+
+        if not self.pcc_enabled or self.pcc_geometry is None:
+            return
+
+        try:
+            dl_sections_mm, phase_offsets_rad, dl_by_section = (
+                self.build_pcc_input_from_tendon_lengths(tendon_length_mm)
+            )
+
+            fk = forward_kinematics_from_dl_mm(
+                dl_sections_mm=dl_sections_mm,
+                geometry=self.pcc_geometry,
+                phase_offsets_rad=phase_offsets_rad,
+            )
+
+            # fk["section_poses"] 的顺序和 self.pcc_chain_order 一致
+            pose_by_section = {}
+
+            for i, section_name in enumerate(self.pcc_chain_order):
+                pose_by_section[section_name] = fk["section_poses"][i]
+
+            section1_dl = dl_by_section.get("section1", [0.0, 0.0, 0.0])
+            section2_dl = dl_by_section.get("section2", [0.0, 0.0, 0.0])
+
+            msg.section1_pcc_dl1_mm = float(section1_dl[0])
+            msg.section1_pcc_dl2_mm = float(section1_dl[1])
+            msg.section1_pcc_dl3_mm = float(section1_dl[2])
+
+            msg.section2_pcc_dl1_mm = float(section2_dl[0])
+            msg.section2_pcc_dl2_mm = float(section2_dl[1])
+            msg.section2_pcc_dl3_mm = float(section2_dl[2])
+
+            if "section1" in pose_by_section:
+                p = pose_by_section["section1"]
+
+                msg.section1_model_theta_rad = float(p["theta"])
+                msg.section1_model_phi_rad = float(p["phi"])
+                msg.section1_model_kappa_1pm = float(p["kappa"])
+                msg.section1_model_arc_length_m = float(p["arc_length"])
+
+                msg.section1_model_px_m = float(p["px"])
+                msg.section1_model_py_m = float(p["py"])
+                msg.section1_model_pz_m = float(p["pz"])
+                msg.section1_model_yaw_rad = float(p["yaw"])
+                msg.section1_model_pitch_rad = float(p["pitch"])
+                msg.section1_model_roll_rad = float(p["roll"])
+
+            if "section2" in pose_by_section:
+                p = pose_by_section["section2"]
+
+                msg.section2_model_theta_rad = float(p["theta"])
+                msg.section2_model_phi_rad = float(p["phi"])
+                msg.section2_model_kappa_1pm = float(p["kappa"])
+                msg.section2_model_arc_length_m = float(p["arc_length"])
+
+                msg.section2_model_px_m = float(p["px"])
+                msg.section2_model_py_m = float(p["py"])
+                msg.section2_model_pz_m = float(p["pz"])
+                msg.section2_model_yaw_rad = float(p["yaw"])
+                msg.section2_model_pitch_rad = float(p["pitch"])
+                msg.section2_model_roll_rad = float(p["roll"])
+
+            msg.end_model_px_m = float(fk["end_px"])
+            msg.end_model_py_m = float(fk["end_py"])
+            msg.end_model_pz_m = float(fk["end_pz"])
+            msg.end_model_yaw_rad = float(fk["end_yaw"])
+            msg.end_model_pitch_rad = float(fk["end_pitch"])
+            msg.end_model_roll_rad = float(fk["end_roll"])
+
+            msg.pcc_model_valid = True
+
+        except Exception as e:
+            msg.pcc_model_valid = False
+            self.get_logger().warn(f"PCC model update failed: {e}")
 
     def publish_states(self):
         tendon_length_mm, motor_position_deg, tendon_slack = self.compute_tendon_state()
@@ -279,6 +411,8 @@ class StateEstimatorNode(Node):
 
         msg.tendon_length_mm = tendon_length_mm
         msg.tendon_slack = tendon_slack
+
+        self.fill_pcc_model_fields(msg, tendon_length_mm)
 
         self.continuum_pub.publish(msg)
 
