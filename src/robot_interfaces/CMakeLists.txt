@@ -18,6 +18,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
     "msg/ZeroCheckState.msg"
     "msg/ModelResidual.msg"
     "msg/SafetyState.msg"
+    "msg/ContinuumTarget.msg"
     "srv/SetZero.srv"
     "srv/HomeMotors.srv"
     "srv/EmergencyStop.srv"

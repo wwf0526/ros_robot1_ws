@@ -285,7 +285,7 @@ class StateEstimatorNode(Node):
     def publish_safety_state(self, tendon_length_mm, motor_position_deg, tendon_slack):
         now = self.get_clock().now()
 
-        tendon_slack_detected = any(tendon_slack)
+        tendon_slack_detected = False
 
         imu_timeout = False
         if self.last_imu1_time is None or self.last_imu2_time is None:
