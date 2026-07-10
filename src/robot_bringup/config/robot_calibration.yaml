@@ -130,12 +130,12 @@ sections:
     moving_disk_count: 5
     disk_thickness_mm: 10.0
     segment_count: 5
-    length_mm: 140.0
-    effective_bending_length_mm: 90.0
+    length_mm: 200.0
+    effective_bending_length_mm: 150.0
     tendon_radius_mm: 55.0
     hexagon_inscribed_radius_mm: 70.0
-    equivalent_segment_length_mm: 18.0
-    segment_lengths_mm: [13.0, 13.0, 15.0, 24.0, 25.0]
+    equivalent_segment_length_mm: 30.0
+    segment_lengths_mm: [30.0, 30.0, 30.0, 30.0, 30.0]
 
 section_imu_map:
   section1: imu1
@@ -190,17 +190,17 @@ pcc_model:
   # 六边形盘外接圆半径，单位 m
   # 对于正六边形：外接圆半径 = 六边形边长
   # 主要用于后续可视化，不直接参与PCC弯曲长度计算
-  hex_radius_m: 0.0810
+  hex_radius_m: 0.08
 
   # 六边形盘厚度，单位 m
-  disk_thickness_m: 0.006
+  disk_thickness_m: 0.010
 
   # 相邻两个六边形盘之间的净间距，单位 m
-  disk_gap_m: 0.0525
+  disk_gap_m: 0.03
 
   # 相邻两个盘中心面之间的距离，单位 m
   # disk_pitch_m = disk_thickness_m + disk_gap_m
-  disk_pitch_m: 0.0585
+  disk_pitch_m: 0.04
 
   # 每段有效间隔数，不是盘的总个数
   # 如果一段有6个盘，并且包含首端盘和末端盘，则有效间隔数为5
@@ -208,7 +208,7 @@ pcc_model:
 
   # 三根等效驱动绳到中心的几何距离，单位 m
   # 对应原 MATLAB 模型中的 d
-  tendon_geometry_d_m: 0.050
+  tendon_geometry_d_m: 0.055
 
   # 三根绳变化量近似相等时，认为该段不弯曲
   equal_dl_tol_m: 1.0e-7

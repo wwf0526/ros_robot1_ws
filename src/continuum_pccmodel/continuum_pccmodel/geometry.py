@@ -39,22 +39,22 @@ class PccGeometry:
     hex_radius_m: float = 0.0810
 
     # 六边形盘厚度，单位 m。
-    disk_thickness_m: float = 0.006
+    disk_thickness_m: float = 0.01
 
     # 相邻两个盘之间的净间距，单位 m。
-    disk_gap_m: float = 0.0525
+    disk_gap_m: float = 0.03
 
     # 相邻两个盘中心面之间的距离，单位 m。
     # disk_pitch_m = disk_thickness_m + disk_gap_m
-    disk_pitch_m: float = 0.0585
-
+    disk_pitch_m: float = 0.04
+    
     # 每段有效间隔数。
     # 如果一段有6个盘，且包含首端盘和末端盘，则有效间隔数是5。
     intervals_per_section: int = 5
 
     # 三根等效驱动绳到中心的几何距离，单位 m。
     # 对应 MATLAB 模型中的 d。
-    tendon_geometry_d_m: float = 0.050
+    tendon_geometry_d_m: float = 0.055
 
     # 判断三根绳收缩量是否近似相等的容差。
     equal_dl_tol_m: float = 0
@@ -98,13 +98,13 @@ def load_pcc_geometry_from_cfg(cfg: Dict) -> PccGeometry:
     geometry = PccGeometry(
         hex_radius_m=float(pcc_cfg.get("hex_radius_m", 0.0810)),
 
-        disk_thickness_m=float(pcc_cfg.get("disk_thickness_m", 0.006)),
-        disk_gap_m=float(pcc_cfg.get("disk_gap_m", 0.0525)),
-        disk_pitch_m=float(pcc_cfg.get("disk_pitch_m", 0.0585)),
+        disk_thickness_m=float(pcc_cfg.get("disk_thickness_m", 0.01)),
+        disk_gap_m=float(pcc_cfg.get("disk_gap_m", 0.03)),
+        disk_pitch_m=float(pcc_cfg.get("disk_pitch_m", 0.04)),
 
         intervals_per_section=int(pcc_cfg.get("intervals_per_section", 5)),
 
-        tendon_geometry_d_m=float(pcc_cfg.get("tendon_geometry_d_m", 0.050)),
+        tendon_geometry_d_m=float(pcc_cfg.get("tendon_geometry_d_m", 0.055)),
 
         equal_dl_tol_m=float(pcc_cfg.get("equal_dl_tol_m", 1e-7)),
     )

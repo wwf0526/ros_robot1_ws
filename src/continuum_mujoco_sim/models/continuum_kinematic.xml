@@ -1,0 +1,114 @@
+<mujoco model="continuum_kinematic">
+  <compiler angle="radian"/>
+
+  <option timestep="0.01" gravity="0 0 0"/>
+
+  <default>
+    <joint limited="true" damping="0" armature="0"/>
+    <geom contype="0" conaffinity="0" density="1000"/>
+  </default>
+
+  <asset>
+    <mesh name="hex_disk" file="assets/hex_disk.stl"/>
+  </asset>
+
+  <worldbody>		#MuJoCo 世界主体（机器人、底座、灯光、地面）
+    <light name="top_light" pos="0 0 1"/>
+    <geom name="base_plate" type="box" pos="0 0 -0.01" size="0.3 0.3 0.01" rgba="0.25 0.25 0.25 1"/>
+
+    <body name="base" pos="0 0 0">
+      <site name="base_site" pos="0 0 0" size="0.006" rgba="1 0 0 1"/>
+
+      <!-- section2 unit 1 -->
+      <body name="sec2_u1" pos="0 0 0.03">
+        <joint name="sec2_u1_bend_x" type="hinge" axis="1 0 0" range="-0.6 0.6"/>
+        <joint name="sec2_u1_bend_y" type="hinge" axis="0 1 0" range="-0.6 0.6"/>
+        <joint name="sec2_u1_slide_z" type="slide" axis="0 0 1" range="-0.03 0.03"/>
+        <geom name="sec2_u1_disk" type="mesh" mesh="hex_disk" rgba="0.2 0.5 0.9 1"/>
+        <geom name="sec2_u1_backbone" type="capsule" fromto="0 0 -0.03 0 0 0" size="0.003" rgba="0.1 0.1 0.1 1"/>
+
+        <!-- section2 unit 2 -->
+        <body name="sec2_u2" pos="0 0 0.03">
+          <joint name="sec2_u2_bend_x" type="hinge" axis="1 0 0" range="-0.6 0.6"/>
+          <joint name="sec2_u2_bend_y" type="hinge" axis="0 1 0" range="-0.6 0.6"/>
+          <joint name="sec2_u2_slide_z" type="slide" axis="0 0 1" range="-0.03 0.03"/>
+          <geom name="sec2_u2_disk" type="mesh" mesh="hex_disk" rgba="0.2 0.5 0.9 1"/>
+          <geom name="sec2_u2_backbone" type="capsule" fromto="0 0 -0.03 0 0 0" size="0.003" rgba="0.1 0.1 0.1 1"/>
+
+          <!-- section2 unit 3 -->
+          <body name="sec2_u3" pos="0 0 0.03">
+            <joint name="sec2_u3_bend_x" type="hinge" axis="1 0 0" range="-0.6 0.6"/>
+            <joint name="sec2_u3_bend_y" type="hinge" axis="0 1 0" range="-0.6 0.6"/>
+            <joint name="sec2_u3_slide_z" type="slide" axis="0 0 1" range="-0.03 0.03"/>
+            <geom name="sec2_u3_disk" type="mesh" mesh="hex_disk" rgba="0.2 0.5 0.9 1"/>
+            <geom name="sec2_u3_backbone" type="capsule" fromto="0 0 -0.03 0 0 0" size="0.003" rgba="0.1 0.1 0.1 1"/>
+
+            <!-- section2 unit 4 -->
+            <body name="sec2_u4" pos="0 0 0.03">
+              <joint name="sec2_u4_bend_x" type="hinge" axis="1 0 0" range="-0.6 0.6"/>
+              <joint name="sec2_u4_bend_y" type="hinge" axis="0 1 0" range="-0.6 0.6"/>
+              <joint name="sec2_u4_slide_z" type="slide" axis="0 0 1" range="-0.03 0.03"/>
+              <geom name="sec2_u4_disk" type="mesh" mesh="hex_disk" rgba="0.2 0.5 0.9 1"/>
+              <geom name="sec2_u4_backbone" type="capsule" fromto="0 0 -0.03 0 0 0" size="0.003" rgba="0.1 0.1 0.1 1"/>
+
+              <!-- section2 unit 5 -->
+              <body name="sec2_u5" pos="0 0 0.03">
+                <joint name="sec2_u5_bend_x" type="hinge" axis="1 0 0" range="-0.6 0.6"/>
+                <joint name="sec2_u5_bend_y" type="hinge" axis="0 1 0" range="-0.6 0.6"/>
+                <joint name="sec2_u5_slide_z" type="slide" axis="0 0 1" range="-0.03 0.03"/>
+                <geom name="sec2_u5_disk" type="mesh" mesh="hex_disk" rgba="0.2 0.5 0.9 1"/>
+                <geom name="sec2_u5_backbone" type="capsule" fromto="0 0 -0.03 0 0 0" size="0.003" rgba="0.1 0.1 0.1 1"/>
+
+                <!-- section1 unit 1 -->
+                <body name="sec1_u1" pos="0 0 0.03">
+                  <joint name="sec1_u1_bend_x" type="hinge" axis="1 0 0" range="-0.6 0.6"/>
+                  <joint name="sec1_u1_bend_y" type="hinge" axis="0 1 0" range="-0.6 0.6"/>
+                  <joint name="sec1_u1_slide_z" type="slide" axis="0 0 1" range="-0.03 0.03"/>
+                  <geom name="sec1_u1_disk" type="mesh" mesh="hex_disk" rgba="0.9 0.5 0.2 1"/>
+                  <geom name="sec1_u1_backbone" type="capsule" fromto="0 0 -0.03 0 0 0" size="0.003" rgba="0.1 0.1 0.1 1"/>
+
+                  <!-- section1 unit 2 -->
+                  <body name="sec1_u2" pos="0 0 0.03">
+                    <joint name="sec1_u2_bend_x" type="hinge" axis="1 0 0" range="-0.6 0.6"/>
+                    <joint name="sec1_u2_bend_y" type="hinge" axis="0 1 0" range="-0.6 0.6"/>
+                    <joint name="sec1_u2_slide_z" type="slide" axis="0 0 1" range="-0.03 0.03"/>
+                    <geom name="sec1_u2_disk" type="mesh" mesh="hex_disk" rgba="0.9 0.5 0.2 1"/>
+                    <geom name="sec1_u2_backbone" type="capsule" fromto="0 0 -0.03 0 0 0" size="0.003" rgba="0.1 0.1 0.1 1"/>
+
+                    <!-- section1 unit 3 -->
+                    <body name="sec1_u3" pos="0 0 0.03">
+                      <joint name="sec1_u3_bend_x" type="hinge" axis="1 0 0" range="-0.6 0.6"/>
+                      <joint name="sec1_u3_bend_y" type="hinge" axis="0 1 0" range="-0.6 0.6"/>
+                      <joint name="sec1_u3_slide_z" type="slide" axis="0 0 1" range="-0.03 0.03"/>
+                      <geom name="sec1_u3_disk" type="mesh" mesh="hex_disk" rgba="0.9 0.5 0.2 1"/>
+                      <geom name="sec1_u3_backbone" type="capsule" fromto="0 0 -0.03 0 0 0" size="0.003" rgba="0.1 0.1 0.1 1"/>
+
+                      <!-- section1 unit 4 -->
+                      <body name="sec1_u4" pos="0 0 0.03">
+                        <joint name="sec1_u4_bend_x" type="hinge" axis="1 0 0" range="-0.6 0.6"/>
+                        <joint name="sec1_u4_bend_y" type="hinge" axis="0 1 0" range="-0.6 0.6"/>
+                        <joint name="sec1_u4_slide_z" type="slide" axis="0 0 1" range="-0.03 0.03"/>
+                        <geom name="sec1_u4_disk" type="mesh" mesh="hex_disk" rgba="0.9 0.5 0.2 1"/>
+                        <geom name="sec1_u4_backbone" type="capsule" fromto="0 0 -0.03 0 0 0" size="0.003" rgba="0.1 0.1 0.1 1"/>
+
+                        <!-- section1 unit 5 -->
+                        <body name="sec1_u5" pos="0 0 0.03">
+                          <joint name="sec1_u5_bend_x" type="hinge" axis="1 0 0" range="-0.6 0.6"/>
+                          <joint name="sec1_u5_bend_y" type="hinge" axis="0 1 0" range="-0.6 0.6"/>
+                          <joint name="sec1_u5_slide_z" type="slide" axis="0 0 1" range="-0.03 0.03"/>
+                          <geom name="sec1_u5_disk" type="mesh" mesh="hex_disk" rgba="0.9 0.5 0.2 1"/>
+                          <geom name="sec1_u5_backbone" type="capsule" fromto="0 0 -0.03 0 0 0" size="0.003" rgba="0.1 0.1 0.1 1"/>
+                          <site name="end_site" pos="0 0 0" size="0.008" rgba="0 1 0 1"/>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>
