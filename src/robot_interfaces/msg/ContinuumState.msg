@@ -58,6 +58,8 @@ float64 section1_model_theta_rad
 float64 section1_model_phi_rad
 float64 section1_model_kappa_1pm
 float64 section1_model_arc_length_m
+float64 section1_model_center_length_m
+float64 section1_model_l0_m
 
 # section1 段末端在整体坐标系下的位姿
 float64 section1_model_px_m
@@ -82,6 +84,8 @@ float64 section2_model_theta_rad
 float64 section2_model_phi_rad
 float64 section2_model_kappa_1pm
 float64 section2_model_arc_length_m
+float64 section2_model_center_length_m
+float64 section2_model_l0_m
 
 # section2 段末端在整体坐标系下的位姿
 float64 section2_model_px_m

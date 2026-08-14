@@ -266,6 +266,7 @@ class StateEstimatorNode(Node):
                 dl_sections_mm=dl_sections_mm,
                 geometry=self.pcc_geometry,
                 phase_offsets_rad=phase_offsets_rad,
+                section_names=self.pcc_chain_order,
             )
 
             # fk["section_poses"] 的顺序和 self.pcc_chain_order 一致
@@ -292,6 +293,8 @@ class StateEstimatorNode(Node):
                 msg.section1_model_phi_rad = float(p["phi"])
                 msg.section1_model_kappa_1pm = float(p["kappa"])
                 msg.section1_model_arc_length_m = float(p["arc_length"])
+                msg.section1_model_center_length_m = float(p["center_length"])
+                msg.section1_model_l0_m = float(p["L0"])
 
                 msg.section1_model_px_m = float(p["px"])
                 msg.section1_model_py_m = float(p["py"])
@@ -307,6 +310,8 @@ class StateEstimatorNode(Node):
                 msg.section2_model_phi_rad = float(p["phi"])
                 msg.section2_model_kappa_1pm = float(p["kappa"])
                 msg.section2_model_arc_length_m = float(p["arc_length"])
+                msg.section2_model_center_length_m = float(p["center_length"])
+                msg.section2_model_l0_m = float(p["L0"])
 
                 msg.section2_model_px_m = float(p["px"])
                 msg.section2_model_py_m = float(p["py"])
@@ -342,8 +347,9 @@ class StateEstimatorNode(Node):
         self.publish_safety_state(tendon_length_mm, motor_position_deg, tendon_slack)
 
     def publish_continuum_state(self, tendon_length_mm, tendon_slack):
-        if self.imu1_euler is None or self.imu2_euler is None:
-            return
+        # 即使 IMU 暂时没有数据，也继续发布 PCC 模型状态，
+        # 这样 MuJoCo viewer 可以只依赖电机反馈/绳长变化实时显示。
+        # IMU 未连接时，IMU 欧拉角字段暂时填 0.0。
 
         tendon_angles = self.cfg["tendon"]["angle_deg"]
 
@@ -388,8 +394,15 @@ class StateEstimatorNode(Node):
             radius2,
         )
 
-        imu1_roll, imu1_pitch, imu1_yaw = self.imu1_euler
-        imu2_roll, imu2_pitch, imu2_yaw = self.imu2_euler
+        if self.imu1_euler is None:
+            imu1_roll, imu1_pitch, imu1_yaw = 0.0, 0.0, 0.0
+        else:
+            imu1_roll, imu1_pitch, imu1_yaw = self.imu1_euler
+
+        if self.imu2_euler is None:
+            imu2_roll, imu2_pitch, imu2_yaw = 0.0, 0.0, 0.0
+        else:
+            imu2_roll, imu2_pitch, imu2_yaw = self.imu2_euler
 
         msg = ContinuumState()
         msg.header.stamp = self.get_clock().now().to_msg()
