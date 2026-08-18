@@ -1,0 +1,16 @@
+apriltag_tip_pose_node:
+  ros__parameters:
+    # 第一版先用 camera 坐标系，不急着转到 continuum_base
+    base_frame: "camera"
+    tag_frame: "continuum_tip_tag"
+
+    output_pose_topic: "/continuum/vision_tip_pose"
+    output_longitudinal_topic: "/continuum/vision_longitudinal_m"
+
+    lookup_rate_hz: 30.0
+
+    # 第一版先观察 z 轴。后续根据相机安装方向再确定纵向轴。
+    longitudinal_axis: "z"
+
+    zero_on_first_detection: true
+    vision_timeout_sec: 0.5

@@ -1,0 +1,23 @@
+apriltag:
+  ros__parameters:
+    image_transport: raw
+    family: 36h11
+
+    # 实际测量值：47 mm = 0.047 m
+    size: 0.047
+
+    max_hamming: 0
+    pose_estimation_method: "pnp"
+
+    detector:
+      threads: 2
+      decimate: 2.0
+      blur: 0.0
+      refine: true
+      sharpening: 0.25
+      debug: false
+
+    tag:
+      ids: [0]
+      frames: ["continuum_tip_tag"]
+      sizes: [0.047]
