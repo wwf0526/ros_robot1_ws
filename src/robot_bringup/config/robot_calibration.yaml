@@ -153,17 +153,18 @@ imu:
     imu1: imu1_link
     imu2: imu2_link
 
-  # IMU零位补偿
-  mounting_offset_deg:
-    imu1:
-      roll: 0.0
-      pitch: 0.0
-      yaw: 0.0
-    imu2:
-      roll: 0.0
-      pitch: 0.0
-      yaw: 0.0
-
+  # IMU 相对 PCC/continuum_base 的固定机械安装旋转
+  #
+  # 实体 X+/X-/Y+/Y-/Z+/Z- 与局部零位实验已确认：
+  #   Robot X = - IMU X
+  #   Robot Y = - IMU Y
+  #   Robot Z = + IMU Z
+  #
+  # 因而两块 IMU 均为 Rz(pi)
+  # quaternion 顺序统一为 [w, x, y, z]
+  mount_quaternion_wxyz:
+    imu1: [0.0, 0.0, 0.0, 1.0]
+    imu2: [0.0, 0.0, 0.0, 1.0]
 state_estimation:
   publish_rate_hz: 50.0
 
@@ -174,7 +175,7 @@ state_estimation:
 
   use_pcc_model: true
   use_imu_correction: true
-  use_slack_detection: true
+  # 当前无直接张力传感器，不宣称松绳检测已生效\n  use_slack_detection: false
 
 # ==========================
 # PCC 正/逆运动学建模参数
@@ -370,3 +371,34 @@ safety:
 
   global_motor_position_limit_deg: [-360.0, 360.0]
   global_speed_limit_rad_s: 10.0
+
+# ============================================================
+# 统一机器人/PCC坐标系
+# ============================================================
+robot_frame_convention:
+  frame_id: continuum_base
+  z_axis: base_to_tip
+  angle_zero_axis: "+X"
+  angle_positive_direction: counterclockwise_viewed_from_+Z
+  angle_0_deg: "+X"
+  angle_90_deg: "+Y"
+  angle_180_deg: "-X"
+  angle_270_deg: "-Y"
+
+# ============================================================
+# PCC + dual IMU quaternion fusion
+# ============================================================
+orientation_fusion:
+  enabled: true
+
+  section1_imu_weight: 0.80
+  section2_imu_weight: 0.80
+
+  zero_window_sec: 3.0
+  zero_min_samples: 50
+  zero_max_dispersion_deg: 0.50
+
+  imu_timeout_sec: 0.50
+  motor_timeout_sec: 0.50
+
+  residual_limit_deg: 10.0

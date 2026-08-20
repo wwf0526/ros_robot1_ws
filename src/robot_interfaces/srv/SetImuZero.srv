@@ -1,0 +1,13 @@
+# 使用最近一段静止 IMU quaternion 建立本次运行标准零姿态
+# window_sec <= 0 时使用配置默认窗口
+
+float32 window_sec
+---
+bool success
+string message
+
+geometry_msgs/Quaternion imu1_zero_orientation
+geometry_msgs/Quaternion imu2_zero_orientation
+
+float64 imu1_max_dispersion_deg
+float64 imu2_max_dispersion_deg

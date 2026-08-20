@@ -1,59 +1,45 @@
-#表示机器人当前状态
-
-#两段连续体状态
+# 连续体机器人当前状态
+#
+# 统一坐标系：
+#   frame_id = continuum_base
+#   +X = 0 deg
+#   +Y = 90 deg
+#   +Z = base -> tip
+#   从 +Z 看向基座，逆时针为角度正方向
 
 std_msgs/Header header
 
-# 第一段曲率
+# ================= legacy/basic state =================
+
 float32 section1_kx
 float32 section1_ky
 
-# 第二段曲率
 float32 section2_kx
 float32 section2_ky
 
-# 第一段IMU
+# 兼容字段：现在表示 runtime zero + mount quaternion 后的 aligned IMU Euler，单位 deg
+# aligned_valid=false 时填 0
 float32 imu1_roll
 float32 imu1_pitch
 float32 imu1_yaw
 
-# 第二段IMU
 float32 imu2_roll
 float32 imu2_pitch
 float32 imu2_yaw
 
-# 两段绳长
 float32[] tendon_length_mm
-
-# 松绳标志
 bool[] tendon_slack
 
 # ================= PCC model output =================
-# 以下字段来自 continuum_pccmodel 正运动学模型
-#
-# 机器人真实串联顺序：
-#   基座 -> section2 -> section1 -> 末端
-#
-# PCC 计算顺序：
-#   T_end = T_section2 * T_section1
-#
-# 注意：
-#   section1 是靠近末端的一段
-#   section2 是靠近基端的一段
+# base -> section2 -> section1 -> tip
 
 bool pcc_model_valid
 
-# -------------------------------
-# section1 PCC 输入
-# section1 对应靠近末端的一段
-# YAML 中：
-#   [DL1, DL2, DL3] = [绳5, 绳3, 绳1]
-# -------------------------------
+# section1 PCC input: [DL1, DL2, DL3] = [绳5, 绳3, 绳1]
 float64 section1_pcc_dl1_mm
 float64 section1_pcc_dl2_mm
 float64 section1_pcc_dl3_mm
 
-# section1 局部 PCC 参数
 float64 section1_model_theta_rad
 float64 section1_model_phi_rad
 float64 section1_model_kappa_1pm
@@ -61,7 +47,6 @@ float64 section1_model_arc_length_m
 float64 section1_model_center_length_m
 float64 section1_model_l0_m
 
-# section1 段末端在整体坐标系下的位姿
 float64 section1_model_px_m
 float64 section1_model_py_m
 float64 section1_model_pz_m
@@ -69,17 +54,11 @@ float64 section1_model_yaw_rad
 float64 section1_model_pitch_rad
 float64 section1_model_roll_rad
 
-# -------------------------------
-# section2 PCC 输入
-# section2 对应靠近基端的一段
-# YAML 中：
-#   [DL1, DL2, DL3] = [绳4, 绳2, 绳6]
-# -------------------------------
+# section2 PCC input: [DL1, DL2, DL3] = [绳4, 绳2, 绳6]
 float64 section2_pcc_dl1_mm
 float64 section2_pcc_dl2_mm
 float64 section2_pcc_dl3_mm
 
-# section2 局部 PCC 参数
 float64 section2_model_theta_rad
 float64 section2_model_phi_rad
 float64 section2_model_kappa_1pm
@@ -87,7 +66,6 @@ float64 section2_model_arc_length_m
 float64 section2_model_center_length_m
 float64 section2_model_l0_m
 
-# section2 段末端在整体坐标系下的位姿
 float64 section2_model_px_m
 float64 section2_model_py_m
 float64 section2_model_pz_m
@@ -95,12 +73,41 @@ float64 section2_model_yaw_rad
 float64 section2_model_pitch_rad
 float64 section2_model_roll_rad
 
-# -------------------------------
-# 整体末端 PCC 位姿
-# -------------------------------
 float64 end_model_px_m
 float64 end_model_py_m
 float64 end_model_pz_m
 float64 end_model_yaw_rad
 float64 end_model_pitch_rad
 float64 end_model_roll_rad
+
+# ================= orientation fusion =================
+
+bool imu_zero_ready
+bool imu1_aligned_valid
+bool imu2_aligned_valid
+
+geometry_msgs/Quaternion section1_model_orientation
+geometry_msgs/Quaternion section2_model_orientation
+geometry_msgs/Quaternion end_model_orientation
+
+geometry_msgs/Quaternion imu1_aligned_orientation
+geometry_msgs/Quaternion imu2_aligned_orientation
+
+geometry_msgs/Quaternion section1_fused_orientation
+geometry_msgs/Quaternion section2_fused_orientation
+geometry_msgs/Quaternion end_fused_orientation
+
+bool section1_fused_valid
+bool section2_fused_valid
+
+float64 section1_orientation_residual_deg
+float64 section2_orientation_residual_deg
+
+# ================= reserved vision fusion interface =================
+# 当前阶段 vision_tip_valid=false，end_fused_position_m 默认等于 PCC 位置。
+# 后续接 AprilTag 时无需再次修改消息接口。
+
+bool vision_tip_valid
+geometry_msgs/Point end_vision_position_m
+geometry_msgs/Point end_fused_position_m
+float64 vision_position_residual_m

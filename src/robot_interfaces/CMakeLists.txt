@@ -8,6 +8,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
     "msg/MotorCommand.msg"
@@ -20,10 +21,11 @@ rosidl_generate_interfaces(${PROJECT_NAME}
     "msg/SafetyState.msg"
     "msg/ContinuumTarget.msg"
     "srv/SetZero.srv"
+    "srv/SetImuZero.srv"
     "srv/HomeMotors.srv"
     "srv/EmergencyStop.srv"
     "srv/ClearEmergencyStop.srv"
-    DEPENDENCIES std_msgs
+    DEPENDENCIES std_msgs geometry_msgs
 )
 
 ament_export_dependencies(rosidl_default_runtime)
