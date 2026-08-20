@@ -167,7 +167,7 @@ def main(args=None):
         if node.ser is not None and node.ser.is_open:
             node.ser.close()
         node.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()
 
 
 if __name__ == '__main__':

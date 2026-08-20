@@ -402,3 +402,32 @@ orientation_fusion:
   motor_timeout_sec: 0.50
 
   residual_limit_deg: 10.0
+
+# ============================================================
+# Final PCC + dual IMU + dual AprilTag fusion
+# ============================================================
+vision_fusion:
+  enabled: true
+  camera_frame: "camera"
+  tip_tag_frame: "continuum_tip_tag"
+  base_tag_frame: "continuum_base_tag"
+
+  # 基座参考 Tag 在 continuum_base 中的固定安装位姿。
+  # 默认假设 Tag 中心位于 base 原点，且 Tag XYZ 与机器人 XYZ 对齐。
+  # 若实体安装有偏移或转角，只改这里。
+  base_tag_pose_in_base:
+    translation_xyz_m: [0.180, -0.237, -0.005]
+    quaternion_wxyz: [1.0, 0.0, 0.0, 0.0]
+
+  # tip PCC reference -> tip Tag center, expressed in tip local frame
+  tip_to_tag_xyz_m: [0.0, 0.0, 0.015]
+
+  # p_fused = p_PCC + K*(p_vision-p_PCC)
+  position_weight_xyz: [0.50, 0.50, 0.50]
+  vision_timeout_sec: 0.50
+  position_residual_limit_m: 0.050
+
+  # 当前旧结构人工测量，仅用于 sanity check，不参与算法：
+  # base -> tip Tag center ≈ 0.335 m
+  # tip Tag center -> camera ≈ 0.325 m
+

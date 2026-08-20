@@ -5,6 +5,8 @@ from collections import deque
 import yaml
 import rclpy
 from rclpy.node import Node
+from rclpy.time import Time
+from tf2_ros import Buffer, TransformListener, TransformException
 
 from sensor_msgs.msg import Imu
 from std_msgs.msg import Bool
@@ -26,6 +28,15 @@ from .orientation_fusion import (
     quat_normalize,
     quat_slerp,
     quat_to_euler_deg,
+)
+
+from .vision_fusion import (
+    compute_base_to_tip_tag,
+    compensate_tip_tag_offset,
+    fuse_position_xyz,
+    transform_msg_to_pose,
+    vec_norm,
+    vec_sub,
 )
 
 
@@ -59,8 +70,14 @@ class StateEstimatorNode(Node):
             "section1": -1.0,
             "section2": -1.0,
         }
+        self.last_vision_extrinsic_ready = False
+        self.last_vision_tip_valid = False
+        self.last_vision_position_residual_m = -1.0
 
         self.load_calibration()
+
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
 
         self.tendon_pub = self.create_publisher(
             TendonState,
@@ -180,6 +197,21 @@ class StateEstimatorNode(Node):
         self.residual_limit_deg = float(
             fusion_cfg.get("residual_limit_deg", 10.0)
         )
+
+        vision_cfg = cfg.get("vision_fusion", {})
+        self.vision_enabled = bool(vision_cfg.get("enabled", True))
+        self.camera_frame = str(vision_cfg.get("camera_frame", "camera"))
+        self.tip_tag_frame = str(vision_cfg.get("tip_tag_frame", "continuum_tip_tag"))
+        self.base_tag_frame = str(vision_cfg.get("base_tag_frame", "continuum_base_tag"))
+        base_tag_pose = vision_cfg.get("base_tag_pose_in_base", {})
+        self.base_tag_translation_m = tuple(float(v) for v in base_tag_pose.get("translation_xyz_m", [0.0, 0.0, 0.0]))
+        self.base_tag_quaternion_wxyz = quat_normalize(tuple(float(v) for v in base_tag_pose.get("quaternion_wxyz", [1.0, 0.0, 0.0, 0.0])))
+        self.tip_to_tag_xyz_m = tuple(float(v) for v in vision_cfg.get("tip_to_tag_xyz_m", [0.0, 0.0, 0.015]))
+        self.position_weight_xyz = tuple(float(v) for v in vision_cfg.get("position_weight_xyz", [0.5, 0.5, 0.5]))
+        if len(self.position_weight_xyz) != 3 or any(v < 0.0 or v > 1.0 for v in self.position_weight_xyz):
+            raise ValueError("vision position weights must be three values in [0,1]")
+        self.vision_timeout_sec = float(vision_cfg.get("vision_timeout_sec", 0.5))
+        self.position_residual_limit_m = float(vision_cfg.get("position_residual_limit_m", 0.05))
 
         pcc_cfg = cfg.get("pcc_model", {})
         self.pcc_enabled = bool(pcc_cfg.get("enabled", False))
@@ -469,6 +501,68 @@ class StateEstimatorNode(Node):
             msg.pcc_model_valid = False
             self.get_logger().warn(f"PCC model update failed: {exc}")
 
+    @staticmethod
+    def _transform_stamp_age_sec(transform_stamped, now):
+        stamp = transform_stamped.header.stamp
+        stamp_ns = int(stamp.sec) * 1000000000 + int(stamp.nanosec)
+        if stamp_ns <= 0:
+            return float("inf")
+        return max(0.0, (now.nanoseconds - stamp_ns) * 1.0e-9)
+
+    def apply_vision_position_fusion(self, msg: ContinuumState):
+        p_model = (float(msg.end_model_px_m), float(msg.end_model_py_m), float(msg.end_model_pz_m))
+        msg.vision_extrinsic_ready = False
+        msg.vision_tip_valid = False
+        msg.vision_position_used = False
+        self._assign_point(msg.end_vision_position_m, (0.0, 0.0, 0.0))
+        self._assign_point(msg.end_fused_position_m, p_model)
+        msg.vision_position_residual_x_m = 0.0
+        msg.vision_position_residual_y_m = 0.0
+        msg.vision_position_residual_z_m = 0.0
+        msg.vision_position_residual_m = -1.0
+        self.last_vision_extrinsic_ready = False
+        self.last_vision_tip_valid = False
+        self.last_vision_position_residual_m = -1.0
+        if not self.vision_enabled or not msg.pcc_model_valid:
+            return
+        now = self.get_clock().now()
+        try:
+            tf_camera_ref = self.tf_buffer.lookup_transform(self.camera_frame, self.base_tag_frame, Time())
+            tf_camera_tip = self.tf_buffer.lookup_transform(self.camera_frame, self.tip_tag_frame, Time())
+        except TransformException:
+            return
+        age_ref = self._transform_stamp_age_sec(tf_camera_ref, now)
+        age_tip = self._transform_stamp_age_sec(tf_camera_tip, now)
+        if age_ref > self.vision_timeout_sec:
+            return
+        msg.vision_extrinsic_ready = True
+        self.last_vision_extrinsic_ready = True
+        if age_tip > self.vision_timeout_sec:
+            return
+        p_c_ref, q_c_ref = transform_msg_to_pose(tf_camera_ref.transform)
+        p_c_tip, q_c_tip = transform_msg_to_pose(tf_camera_tip.transform)
+        try:
+            p_b_tag, _ = compute_base_to_tip_tag(self.base_tag_translation_m, self.base_tag_quaternion_wxyz, p_c_ref, q_c_ref, p_c_tip, q_c_tip)
+            q_tip_fused = (float(msg.end_fused_orientation.w), float(msg.end_fused_orientation.x), float(msg.end_fused_orientation.y), float(msg.end_fused_orientation.z))
+            p_vision = compensate_tip_tag_offset(p_b_tag, q_tip_fused, self.tip_to_tag_xyz_m)
+        except ValueError:
+            return
+        residual = vec_sub(p_vision, p_model)
+        residual_norm = vec_norm(residual)
+        self._assign_point(msg.end_vision_position_m, p_vision)
+        msg.vision_position_residual_x_m = float(residual[0])
+        msg.vision_position_residual_y_m = float(residual[1])
+        msg.vision_position_residual_z_m = float(residual[2])
+        msg.vision_position_residual_m = float(residual_norm)
+        msg.vision_tip_valid = True
+        self.last_vision_tip_valid = True
+        self.last_vision_position_residual_m = float(residual_norm)
+        if residual_norm > self.position_residual_limit_m:
+            return
+        p_fused = fuse_position_xyz(p_model, p_vision, self.position_weight_xyz)
+        self._assign_point(msg.end_fused_position_m, p_fused)
+        msg.vision_position_used = True
+
     def apply_orientation_fusion(self, msg: ContinuumState):
         msg.imu_zero_ready = bool(self.imu_zero_ready())
         msg.imu1_aligned_valid = False
@@ -688,6 +782,7 @@ class StateEstimatorNode(Node):
 
         self.fill_pcc_model_fields(msg, tendon_length_mm)
         self.apply_orientation_fusion(msg)
+        self.apply_vision_position_fusion(msg)
 
         self.continuum_pub.publish(msg)
 
@@ -748,6 +843,14 @@ class StateEstimatorNode(Node):
             and max_residual_deg > self.residual_limit_deg
         )
 
+        vision_extrinsic_ready = ((not self.vision_enabled) or self.last_vision_extrinsic_ready)
+        vision_timeout = (self.vision_enabled and not self.last_vision_tip_valid)
+        vision_position_residual_too_large = (
+            self.vision_enabled
+            and self.last_vision_position_residual_m >= 0.0
+            and self.last_vision_position_residual_m > self.position_residual_limit_m
+        )
+
         safe_to_control = not (
             self.emergency_stop_active
             or motor_timeout
@@ -757,6 +860,9 @@ class StateEstimatorNode(Node):
             or motor_limit_reached
             or tendon_slack_detected
             or residual_too_large
+            or not vision_extrinsic_ready
+            or vision_timeout
+            or vision_position_residual_too_large
         )
 
         msg = SafetyState()
@@ -773,35 +879,36 @@ class StateEstimatorNode(Node):
         msg.residual_too_large = bool(residual_too_large)
         msg.emergency_stop_active = bool(self.emergency_stop_active)
         msg.max_orientation_residual_deg = float(max_residual_deg)
+        msg.vision_extrinsic_ready = bool(vision_extrinsic_ready)
+        msg.vision_timeout = bool(vision_timeout)
+        msg.vision_position_residual_too_large = bool(vision_position_residual_too_large)
+        msg.max_position_residual_m = float(self.last_vision_position_residual_m)
 
         unsafe_reasons = []
 
+        unsafe_reasons = []
         if self.emergency_stop_active:
             unsafe_reasons.append("emergency stop active")
-
         if motor_timeout:
             unsafe_reasons.append("motor feedback timeout")
-
         if imu_timeout:
             unsafe_reasons.append("IMU timeout")
-
         if self.use_imu_correction and not imu_zero_ready:
             unsafe_reasons.append("runtime IMU zero not established")
-
         if not self.last_pcc_model_valid:
             unsafe_reasons.append("PCC model invalid")
-
         if motor_limit_reached:
             unsafe_reasons.append("motor limit reached")
-
         if tendon_slack_detected:
             unsafe_reasons.append("tendon slack detected")
-
         if residual_too_large:
-            unsafe_reasons.append(
-                "PCC/IMU orientation residual too large"
-            )
-
+            unsafe_reasons.append("PCC/IMU orientation residual too large")
+        if not vision_extrinsic_ready:
+            unsafe_reasons.append("vision base/camera extrinsic unavailable")
+        if vision_timeout:
+            unsafe_reasons.append("vision tip timeout")
+        if vision_position_residual_too_large:
+            unsafe_reasons.append("PCC/vision position residual too large")
         if unsafe_reasons:
             msg.status = "UNSAFE: " + "; ".join(unsafe_reasons)
         else:
