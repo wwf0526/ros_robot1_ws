@@ -1,0 +1,5 @@
+# 显式使能/禁止软件绝对位置闭环。
+bool enable
+---
+bool success
+string message

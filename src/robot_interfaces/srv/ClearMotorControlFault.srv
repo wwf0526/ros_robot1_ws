@@ -1,0 +1,4 @@
+# 清除闭环执行器锁存故障；仅在安全与反馈恢复后允许。
+---
+bool success
+string message

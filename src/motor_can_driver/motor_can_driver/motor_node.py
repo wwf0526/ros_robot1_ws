@@ -1,83 +1,131 @@
-#ROS2 节点，订阅 /motor/command、发布 /motor/state，调用ms42ddc_driver.py和 ms42ddc_driver.py
+"""Safety-gated raw MS42DDC hardware node with asynchronous feedback."""
+
 from __future__ import annotations
+
+import math
+import time
+
 import rclpy
-import json
-import os
 from rclpy.node import Node
-from robot_interfaces.msg import MotorCommand, MotorCommandArray, MotorState
-from .ms42ddc_driver import MS42DDCDriver
-from robot_interfaces.srv import (SetZero, HomeMotors, EmergencyStop, ClearEmergencyStop)
 from std_msgs.msg import Bool
+
+from robot_interfaces.msg import (
+    MotorCommand,
+    MotorCommandArray,
+    MotorPositionControlState,
+    MotorState,
+    SafetyState,
+)
+from robot_interfaces.srv import (
+    ClearEmergencyStop,
+    EmergencyStop,
+    SetZero,
+)
+
+from .ms42ddc_driver import MS42DDCDriver
+
+
+MODE_STOP = 0
+MODE_RELATIVE_POSITION = 2
 
 
 class MotorNode(Node):
+    """Own the physical CAN buses and enforce the final raw-command boundary."""
+
     def __init__(self):
         super().__init__("motor_node")
-        self.estop_active = False	#False：当前没有急停，可以控制电机
-        #declare_parameter：声明参数
+
         self.declare_parameter("interface", "socketcan")
         self.declare_parameter("primary_channel", "can0")
         self.declare_parameter("secondary_channel", "can1")
         self.declare_parameter("bitrate", 1000000)
         self.declare_parameter("feedback_id", 10)
         self.declare_parameter("microstep", 32)
-        self.declare_parameter("timeout", 1.0)
+        self.declare_parameter("feedback_service_timeout_sec", 0.1)
         self.declare_parameter("motor_ids", [1, 2, 3, 4, 5, 6])
         self.declare_parameter("secondary_ids", [4, 5, 6])
-        self.declare_parameter("command_topic", "/motor/command")
-        self.declare_parameter("command_array_topic", "/motor/command_array")
-        self.declare_parameter("state_topic", "/motor/state")
-        self.declare_parameter("publish_rate", 50.0)
-        self.declare_parameter("default_speed_rad_s", 3.0)
-        self.declare_parameter("zero_tolerance_deg", 0.2)
+        self.declare_parameter("command_topic", "/motor/raw_command")
         self.declare_parameter(
-            "zero_file",
-            "/tmp/ms42ddc_zero_offsets.json",
+            "command_array_topic",
+            "/motor/raw_command_array",
         )
-        
-        #get_parameter：读取参数
-        self.interface = self.get_parameter("interface").value
-        self.primary_channel = self.get_parameter("primary_channel").value
-        self.secondary_channel = self.get_parameter("secondary_channel").value
+        self.declare_parameter("state_topic", "/motor/state")
+        self.declare_parameter("feedback_request_rate_hz", 300.0)
+        self.declare_parameter("feedback_publish_rate_hz", 200.0)
+        self.declare_parameter("safety_timeout_sec", 0.25)
+        self.declare_parameter("controller_state_timeout_sec", 0.5)
+        self.declare_parameter("require_safety_state", True)
+        self.declare_parameter("max_relative_command_deg", 5.0)
+        self.declare_parameter("max_speed_rad_s", 1.0)
+        self.declare_parameter("zero_file", "/tmp/ms42ddc_zero_offsets.json")
+
+        self.interface = str(self.get_parameter("interface").value)
+        self.primary_channel = str(
+            self.get_parameter("primary_channel").value
+        )
+        self.secondary_channel = str(
+            self.get_parameter("secondary_channel").value
+        )
         self.bitrate = int(self.get_parameter("bitrate").value)
         self.feedback_id = int(self.get_parameter("feedback_id").value)
         self.microstep = int(self.get_parameter("microstep").value)
-        self.timeout = float(self.get_parameter("timeout").value)
-        self.motor_ids = list(self.get_parameter("motor_ids").value)
-        self.secondary_ids = list(self.get_parameter("secondary_ids").value)
-        self.command_topic = self.get_parameter("command_topic").value
-        self.command_array_topic = self.get_parameter("command_array_topic").value
-        self.state_topic = self.get_parameter("state_topic").value
-        self.publish_rate = float(self.get_parameter("publish_rate").value)
-        self.default_speed_rad_s = float(
-            self.get_parameter("default_speed_rad_s").value
+        self.feedback_service_timeout_sec = float(
+            self.get_parameter("feedback_service_timeout_sec").value
         )
-        self.zero_tolerance_deg = float(
-            self.get_parameter("zero_tolerance_deg").value
+        self.motor_ids = [
+            int(value) for value in self.get_parameter("motor_ids").value
+        ]
+        self.secondary_ids = [
+            int(value) for value in self.get_parameter("secondary_ids").value
+        ]
+        self.command_topic = str(
+            self.get_parameter("command_topic").value
         )
-        self.zero_file = self.get_parameter("zero_file").value
-        
-        #读取零点文件
-        self.zero_offsets = {mid:0.0 for mid in self.motor_ids}
-        if os.path.exists(self.zero_file):
-            try:
-                with open(self.zero_file, "r") as f:
-                    data = json.load(f)          # <- 缩进到 with 内部
-                for k, v in data.items():
-                    self.zero_offsets[int(k)] = float(v)
-                self.get_logger().info(f"Loaded zero offsets: {self.zero_offsets}")
-            except Exception as exc:
-                self.get_logger().warn(f"Failed to load zero offsets: {exc}")
-        else:
-            self.get_logger().info("No zero offset file found, using zeros.")
+        self.command_array_topic = str(
+            self.get_parameter("command_array_topic").value
+        )
+        self.state_topic = str(self.get_parameter("state_topic").value)
+        self.feedback_request_rate_hz = float(
+            self.get_parameter("feedback_request_rate_hz").value
+        )
+        self.feedback_publish_rate_hz = float(
+            self.get_parameter("feedback_publish_rate_hz").value
+        )
+        self.safety_timeout_sec = float(
+            self.get_parameter("safety_timeout_sec").value
+        )
+        self.controller_state_timeout_sec = float(
+            self.get_parameter("controller_state_timeout_sec").value
+        )
+        self.require_safety_state = bool(
+            self.get_parameter("require_safety_state").value
+        )
+        self.max_relative_command_deg = float(
+            self.get_parameter("max_relative_command_deg").value
+        )
+        self.max_speed_rad_s = float(
+            self.get_parameter("max_speed_rad_s").value
+        )
+        self.zero_file = str(self.get_parameter("zero_file").value)
 
-        #创建自定义服务
-        self.set_zero_srv = self.create_service(SetZero, "/motor/set_zero", self.set_zero_callback)
-        self.home_srv = self.create_service(HomeMotors, "/motor/home_motors", self.home_motors_callback)
-        self.estop_srv = self.create_service(EmergencyStop, "/motor/emergency_stop", self.emergency_stop_callback)
-        self.clear_estop_srv = self.create_service(ClearEmergencyStop, "/motor/clear_estop", self.clear_estop_callback)
-        
-        #创建底层驱动对象
+        if self.feedback_request_rate_hz <= 0.0:
+            raise ValueError("feedback_request_rate_hz must be positive")
+        if self.feedback_publish_rate_hz <= 0.0:
+            raise ValueError("feedback_publish_rate_hz must be positive")
+
+        self.estop_active = False
+        self.safety_safe = False
+        self.safety_status = "not received"
+        self.last_safety_time: float | None = None
+        self._safety_stop_sent = False
+        self._feedback_request_index = 0
+        self.controller_enabled = False
+        self.controller_batch_in_flight = False
+        self.last_controller_state_time: float | None = None
+        self._last_published_sequence = {
+            motor_id: 0 for motor_id in self.motor_ids
+        }
+
         self.driver = MS42DDCDriver(
             interface=self.interface,
             primary_channel=self.primary_channel,
@@ -85,299 +133,342 @@ class MotorNode(Node):
             bitrate=self.bitrate,
             feedback_id=self.feedback_id,
             microstep=self.microstep,
-            timeout=self.timeout,
+            timeout=self.feedback_service_timeout_sec,
             motor_ids=self.motor_ids,
             secondary_ids=self.secondary_ids,
             zero_file=self.zero_file,
         )
-        
-        #打开 CAN
-        try:
-            self.driver.open()
-            self.get_logger().info(
-                f"Motor CAN opened: {self.primary_channel}, {self.secondary_channel}, "
-                f"interface={self.interface}, bitrate={self.bitrate}"
-            )
-        except Exception as exc:
-            self.get_logger().error(f"Failed to open CAN bus: {exc}")
-            raise
-        
-        #创建单电机订阅器
-        self.command_sub = self.create_subscription(
+        self.driver.open()
+
+        self.create_subscription(
             MotorCommand,
             self.command_topic,
             self.command_callback,
             10,
         )
-
-        #创建多电机订阅器
-        self.command_array_sub = self.create_subscription(
+        self.create_subscription(
             MotorCommandArray,
             self.command_array_topic,
             self.command_array_callback,
             10,
         )
-        
-        #创建状态发布器
+        self.create_subscription(
+            SafetyState,
+            "/continuum/safety_state",
+            self.safety_callback,
+            10,
+        )
+        self.create_subscription(
+            MotorPositionControlState,
+            "/motor/position_control_state",
+            self.controller_state_callback,
+            10,
+        )
+
         self.state_pub = self.create_publisher(
             MotorState,
             self.state_topic,
-            10,
+            50,
         )
-        
-        #创建急停状态发布器
         self.estop_state_pub = self.create_publisher(
             Bool,
             "/motor/emergency_stop_active",
             10,
         )
-        
-        #创建定时器
-        timer_period = 1.0 / self.publish_rate
-        self.timer = self.create_timer(timer_period, self.publish_state)
-        
-        #创建急停状态的定时器
-        self.estop_timer = self.create_timer(
-            0.1,
-            self.publish_estop_state,
+
+        self.set_zero_srv = self.create_service(
+            SetZero,
+            "/motor/set_zero",
+            self.set_zero_callback,
+        )
+        self.estop_srv = self.create_service(
+            EmergencyStop,
+            "/motor/emergency_stop",
+            self.emergency_stop_callback,
+        )
+        self.clear_estop_srv = self.create_service(
+            ClearEmergencyStop,
+            "/motor/clear_estop",
+            self.clear_estop_callback,
         )
 
-    #command_callback：单电机命令回调
-    def command_callback(self, msg: MotorCommand):
-        if self.estop_active:
+        self.feedback_request_timer = self.create_timer(
+            1.0 / self.feedback_request_rate_hz,
+            self.request_next_feedback,
+        )
+        self.feedback_publish_timer = self.create_timer(
+            1.0 / self.feedback_publish_rate_hz,
+            self.publish_new_feedback,
+        )
+        self.safety_timer = self.create_timer(0.05, self.safety_watchdog)
+        self.estop_timer = self.create_timer(0.1, self.publish_estop_state)
+
+        self.get_logger().info(
+            "Motor CAN opened with threaded feedback: "
+            f"{self.primary_channel}, {self.secondary_channel}; "
+            f"raw topic={self.command_array_topic}"
+        )
+
+    def safety_callback(self, msg: SafetyState) -> None:
+        self.safety_safe = bool(msg.safe_to_control)
+        self.safety_status = str(msg.status)
+        self.last_safety_time = time.monotonic()
+
+    def controller_state_callback(
+        self,
+        msg: MotorPositionControlState,
+    ) -> None:
+        self.controller_enabled = bool(msg.controller_enabled)
+        self.controller_batch_in_flight = bool(msg.batch_in_flight)
+        self.last_controller_state_time = time.monotonic()
+
+    def _safety_valid(self) -> bool:
+        if not self.require_safety_state:
+            return True
+        return bool(
+            self.last_safety_time is not None
+            and time.monotonic() - self.last_safety_time
+            <= self.safety_timeout_sec
+            and self.safety_safe
+        )
+
+    def _movement_allowed(self) -> bool:
+        controller_authorized = bool(
+            self.last_controller_state_time is not None
+            and time.monotonic() - self.last_controller_state_time
+            <= self.controller_state_timeout_sec
+            and self.controller_enabled
+        )
+        return bool(
+            not self.estop_active
+            and self._safety_valid()
+            and controller_authorized
+        )
+
+    def _validate_move(self, msg: MotorCommand) -> tuple[int, float, float]:
+        motor_id = int(msg.motor_id)
+        if motor_id not in self.motor_ids:
+            raise ValueError(f"unknown motor id: {motor_id}")
+        if int(msg.mode) != MODE_RELATIVE_POSITION:
+            raise ValueError(
+                f"unsupported raw mode {int(msg.mode)}; only 0=stop and "
+                "2=relative position are allowed"
+            )
+        delta_deg = float(msg.target_deg)
+        speed_rad_s = float(msg.speed_rad_s)
+        if not math.isfinite(delta_deg):
+            raise ValueError(f"motor {motor_id}: non-finite relative delta")
+        if abs(delta_deg) > self.max_relative_command_deg:
+            raise ValueError(
+                f"motor {motor_id}: relative delta {delta_deg:.6f} exceeds "
+                f"limit {self.max_relative_command_deg:.6f} deg"
+            )
+        if not math.isfinite(speed_rad_s) or speed_rad_s <= 0.0:
+            raise ValueError(f"motor {motor_id}: invalid speed")
+        if speed_rad_s > self.max_speed_rad_s:
+            raise ValueError(
+                f"motor {motor_id}: speed {speed_rad_s:.6f} exceeds "
+                f"limit {self.max_speed_rad_s:.6f} rad/s"
+            )
+        return motor_id, delta_deg, speed_rad_s
+
+    def command_callback(self, msg: MotorCommand) -> None:
+        if int(msg.mode) == MODE_STOP:
+            try:
+                self.driver.stop(int(msg.motor_id))
+            except Exception as exc:
+                self.get_logger().error(f"stop command failed: {exc}")
+            return
+        if not self._movement_allowed():
             self.get_logger().warn(
-                "Command rejected: emergency stop is active."
+                f"Raw move rejected: estop={self.estop_active}, "
+                f"safety={self.safety_status}, "
+                f"controller_enabled={self.controller_enabled}"
             )
             return
-            
-        motor_id = int(msg.motor_id)
-        mode = int(msg.mode)
-        target_deg = float(msg.target_deg)
-        speed_rad_s = float(msg.speed_rad_s)
-        
-        if motor_id not in self.motor_ids:
-            self.get_logger().warn(f"Unknown motor id: {motor_id}")
+        try:
+            motor_id, delta_deg, speed_rad_s = self._validate_move(msg)
+            self.driver.send_position(motor_id, delta_deg, speed_rad_s)
+        except Exception as exc:
+            self.get_logger().error(f"raw motor command rejected/failed: {exc}")
+
+    def command_array_callback(self, msg: MotorCommandArray) -> None:
+        if not msg.commands:
+            return
+        if all(int(command.mode) == MODE_STOP for command in msg.commands):
+            try:
+                self.driver.stop_all()
+            except Exception as exc:
+                self.get_logger().error(f"stop-all failed: {exc}")
+            return
+        if any(int(command.mode) == MODE_STOP for command in msg.commands):
+            self.get_logger().error("mixed stop/move raw arrays are rejected")
+            return
+        if not self._movement_allowed():
+            self.get_logger().warn(
+                f"Raw move array rejected: estop={self.estop_active}, "
+                f"safety={self.safety_status}, "
+                f"controller_enabled={self.controller_enabled}"
+            )
             return
 
+        ids = [int(command.motor_id) for command in msg.commands]
+        if len(ids) != len(set(ids)):
+            self.get_logger().error("raw move array contains duplicate motor ids")
+            return
         try:
-            if mode == 1:
-                # 速度模式：以后需要在 driver 中实现 send_speed()
-                self.get_logger().warn(
-                    "mode=1 speed mode is not implemented yet"
-                )
+            validated = [self._validate_move(command) for command in msg.commands]
+            for motor_id, delta_deg, speed_rad_s in validated:
+                self.driver.send_position(motor_id, delta_deg, speed_rad_s)
+        except Exception as exc:
+            self.get_logger().error(f"raw move array rejected/failed: {exc}")
+            try:
+                self.driver.stop_all()
+            except Exception:
+                pass
 
-            elif mode == 2:
-                # 位置模式：当前已支持
-                self.driver.send_position(
-                    motor_id,
-                    target_deg,
-                    speed_rad_s
-                )
-                self.get_logger().info(
-                    f"motor {motor_id}: position mode, "
-                    f"target={target_deg:.3f} deg, speed={speed_rad_s:.3f} rad/s"
-                )
-
-            elif mode == 3:
-                # 力矩/电流模式：以后需要在 driver 中实现 send_torque/current()
-                self.get_logger().warn(
-                    "mode=3 torque/current mode is not implemented yet"
-                )
-
-            elif mode == 4:
-                # 单圈绝对角度模式：以后需要在 driver 中实现 send_absolute_position()
-                self.get_logger().warn(
-                    "mode=4 absolute position mode is not implemented yet"
-                )
-
-            else:
-                self.get_logger().warn(
-                    f"Unsupported mode: {mode}. "
-                    "Supported modes: 1=speed, 2=position, 3=current, 4=absolute"
-                )
-
+    def request_next_feedback(self) -> None:
+        motor_id = self.motor_ids[self._feedback_request_index]
+        self._feedback_request_index = (
+            self._feedback_request_index + 1
+        ) % len(self.motor_ids)
+        try:
+            self.driver.request_status(motor_id)
         except Exception as exc:
             self.get_logger().warn(
-                f"motor {motor_id} command failed: {exc}"
+                f"feedback request motor {motor_id} failed: {exc}"
             )
-            
-    #command_array_callback：多电机命令回调
-    def command_array_callback(self, msg: MotorCommandArray):
-        if self.estop_active:
-            self.get_logger().warn(
-                "Command rejected: emergency stop is active."
-            )
-            return
-            
-        if not msg.commands:
-            self.get_logger().warn("Received empty MotorCommandArray")
-            return
 
-        self.get_logger().info(f"Received MotorCommandArray with {len(msg.commands)} commands")
-
-        for cmd in msg.commands:
-            motor_id = int(cmd.motor_id)
-            mode = int(cmd.mode)
-            target_deg = float(cmd.target_deg)
-            speed_rad_s = float(cmd.speed_rad_s)
-
-            if motor_id not in self.motor_ids:
-                self.get_logger().warn(f"Unknown motor id in array: {motor_id}")
-                continue
-
-            try:
-                if mode == 2:
-                    # 位置模式
-                    self.driver.send_position(motor_id, target_deg, speed_rad_s)
-                    self.get_logger().info(
-                        f"array motor {motor_id}: target={target_deg:.3f} deg, "
-                        f"speed={speed_rad_s:.3f} rad/s"
-                    )
-                else:
-                    self.get_logger().warn(
-                        f"Unsupported mode in array: {mode}. Currently only mode=2 is supported."
-                    )
-
-            except Exception as exc:
-                self.get_logger().warn(
-                    f"array motor {motor_id} command failed: {exc}"
-                )
-
-    #publish_state：发布电机状态
-    def publish_state(self):
+    def publish_new_feedback(self) -> None:
         for motor_id in self.motor_ids:
-            try:
-                status = self.driver.read_status(motor_id)
-                rel_deg = self.driver.relative_position(status)
+            cached = self.driver.latest_status(motor_id)
+            if cached is None:
+                continue
+            status, _, sequence = cached
+            if sequence <= self._last_published_sequence[motor_id]:
+                continue
+            self._last_published_sequence[motor_id] = sequence
 
-                msg = MotorState()
-                msg.header.stamp = self.get_clock().now().to_msg()
-                msg.header.frame_id = "motor_base"
+            msg = MotorState()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.frame_id = "motor_zero_frame"
+            msg.motor_id = int(status.motor_id)
+            msg.raw_deg = float(status.raw_deg)
+            msg.position_deg = float(self.driver.relative_position(status))
+            msg.speed_rad_s = float(status.speed_rad_s)
+            msg.reached = bool(status.reached)
+            msg.channel = self.driver.channel_for_motor(motor_id)
+            self.state_pub.publish(msg)
 
-                msg.motor_id = int(status.motor_id)
-                msg.raw_deg = float(status.raw_deg)
-                msg.position_deg = float(rel_deg)
-                msg.speed_rad_s = float(status.speed_rad_s)
-                msg.reached = bool(status.reached)
-                msg.channel = self.driver.channel_for_motor(motor_id)
+    def safety_watchdog(self) -> None:
+        if self._movement_allowed():
+            self._safety_stop_sent = False
+            return
+        if self._safety_stop_sent:
+            return
+        try:
+            self.driver.stop_all()
+            self._safety_stop_sent = True
+            self.get_logger().warn(
+                "Execution watchdog stopped all motors: "
+                f"safety={self.safety_status}, "
+                f"controller_enabled={self.controller_enabled}"
+            )
+        except Exception as exc:
+            self.get_logger().error(f"Safety watchdog stop failed: {exc}")
 
-                self.state_pub.publish(msg)
-
-            except Exception as exc:
-                self.get_logger().warn(f"read motor {motor_id} failed: {exc}")
-
-    #set_zero_callback：设置零点服务
     def set_zero_callback(self, request, response):
-        motors_to_set = request.motor_ids or self.motor_ids
-        success_ids = []
-        for mid in motors_to_set:
-            try:
-                status = self.driver.read_status(mid)
-                self.zero_offsets[mid] = float(status.raw_deg)
-                self.driver.zero_offsets[mid] = float(status.raw_deg)
-                success_ids.append(mid)
-            except Exception as exc:
-                self.get_logger().warn(
-                    f"set zero motor {mid} failed: {exc}"
-                )
-        if success_ids:
-            with open(self.zero_file, "w") as f:
-                json.dump(self.zero_offsets, f)
-            response.success = True
-            response.message = (
-                f"Zero offsets saved for motors: {success_ids}"
-            )
-        else:
-            response.success = False
-            response.message = (
-                "No motor feedback received."
-            )
-        return response
-    
-    #home_motors_callback：回零服务
-    def home_motors_callback(self, request, response):
         if self.estop_active:
             response.success = False
-            response.message = "Home rejected: emergency stop is active."
-            self.get_logger().warn(response.message)
+            response.message = "Set-zero rejected: emergency stop active"
             return response
-    
-        motors_to_home = request.motor_ids or self.motor_ids
-        speed = request.speed_rad_s or self.default_speed_rad_s
-        for mid in motors_to_home:
-            try:
-                status = self.driver.read_status(mid)
-                current_raw_deg = float(status.raw_deg)
-                zero_deg = self.zero_offsets.get(mid, 0.0)
-                # 考虑方向修正
-                delta_deg = zero_deg - current_raw_deg
-                self.driver.send_position(mid, delta_deg, speed)
-            except Exception as exc:
-                self.get_logger().warn(f"home motor {mid} failed: {exc}")
+        controller_state_fresh = bool(
+            self.last_controller_state_time is not None
+            and time.monotonic() - self.last_controller_state_time
+            <= self.controller_state_timeout_sec
+        )
+        if not controller_state_fresh:
+            response.success = False
+            response.message = (
+                "Set-zero rejected: fresh disabled controller state required"
+            )
+            return response
+        if self.controller_enabled or self.controller_batch_in_flight:
+            response.success = False
+            response.message = (
+                "Set-zero rejected: disable the controller and stop motion first"
+            )
+            return response
+        requested = [int(mid) for mid in request.motor_ids]
+        if not requested:
+            requested = list(self.motor_ids)
+        unknown = sorted(set(requested) - set(self.motor_ids))
+        if unknown:
+            response.success = False
+            response.message = f"Unknown motor ids: {unknown}"
+            return response
+
+        try:
+            self.driver.set_zero_many(requested)
+        except Exception as exc:
+            response.success = False
+            response.message = f"Set-zero failed atomically: {exc}"
+            return response
         response.success = True
-        response.message =( f"Motors moved to zero positions: {motors_to_home}")
+        response.message = f"Zero offsets saved atomically for motors {requested}"
         return response
 
-    #emergency_stop_callback：急停服务
     def emergency_stop_callback(self, request, response):
+        del request
         self.estop_active = True
-
         try:
             self.driver.stop_all()
             response.success = True
-            response.message = "Emergency stop activated. All motors stopped."
-            self.get_logger().warn(response.message)
-
+            response.message = "Emergency stop activated; all motors stopped"
         except Exception as exc:
             response.success = False
-            response.message = f"Emergency stop failed: {exc}"
-            self.get_logger().error(response.message)
-
+            response.message = f"Emergency stop transmission failed: {exc}"
+        self.get_logger().warn(response.message)
         return response
 
-    #clear_estop_callback：清除急停服务
     def clear_estop_callback(self, request, response):
+        del request
         self.estop_active = False
-
         response.success = True
-        response.message = "Emergency stop cleared. Motor commands are enabled."
+        response.message = (
+            "Emergency stop cleared; motion still requires fresh SAFE state "
+            "and an explicitly enabled position controller"
+        )
         self.get_logger().info(response.message)
-
         return response
-	
-    def publish_estop_state(self):
+
+    def publish_estop_state(self) -> None:
         msg = Bool()
         msg.data = bool(self.estop_active)
         self.estop_state_pub.publish(msg)
 
-    #destroy_node：关闭节点
     def destroy_node(self):
         try:
             self.driver.stop_all()
+        except Exception:
+            pass
+        try:
             self.driver.close()
         except Exception:
             pass
-
         super().destroy_node()
-    
-#main：程序入口
+
+
 def main(args=None):
     rclpy.init(args=args)
     node = MotorNode()
-
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("KeyboardInterrupt received, shutting down")
+        pass
     finally:
-        try:
-            node.destroy_node()
-        except Exception:
-            pass
-        try:
-            rclpy.try_shutdown()  # 使用 try_shutdown 避免重复调用
-        except Exception:
-            pass
+        node.destroy_node()
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

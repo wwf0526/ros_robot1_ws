@@ -24,7 +24,6 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'mpc_node = continuum_mpc.mpc_node:main',
             'qp_mpc_node = continuum_mpc.qp_mpc_node:main',
         ],
     },

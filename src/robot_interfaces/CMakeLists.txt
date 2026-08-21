@@ -14,6 +14,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
     "msg/MotorCommand.msg"
     "msg/MotorState.msg"
     "msg/MotorCommandArray.msg"
+    "msg/MotorPositionTarget.msg"
+    "msg/MotorPositionTargetArray.msg"
+    "msg/MotorPositionControlState.msg"
     "msg/TendonState.msg"
     "msg/ContinuumState.msg"
     "msg/ZeroCheckState.msg"
@@ -25,6 +28,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
     "srv/HomeMotors.srv"
     "srv/EmergencyStop.srv"
     "srv/ClearEmergencyStop.srv"
+    "srv/SetMotorControlEnabled.srv"
+    "srv/ClearMotorControlFault.srv"
     DEPENDENCIES std_msgs geometry_msgs
 )
 

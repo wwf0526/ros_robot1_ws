@@ -1,0 +1,21 @@
+motor_position_controller:
+  ros__parameters:
+    target_topic: /motor/position_target
+    raw_command_topic: /motor/raw_command_array
+    motor_state_topic: /motor/state
+    safety_topic: /continuum/safety_state
+    controller_state_topic: /motor/position_control_state
+
+    control_rate_hz: 50.0
+    target_timeout_sec: 0.5
+    feedback_timeout_sec: 0.25
+    safety_timeout_sec: 0.25
+    batch_motion_timeout_sec: 2.0
+
+    position_tolerance_deg: 0.2
+    proportional_gain: 1.0
+    default_speed_rad_s: 0.3
+    speed_limit_rad_s: 1.0
+
+    require_safety_state: true
+    start_enabled: false

@@ -1,9 +1,11 @@
 import math
 import time
 from collections import deque
+from pathlib import Path
 
 import yaml
 import rclpy
+from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 from rclpy.time import Time
 from tf2_ros import Buffer, TransformListener, TransformException
@@ -49,9 +51,18 @@ class StateEstimatorNode(Node):
 
         self.declare_parameter(
             "calibration_file",
-            "/home/wangwenfeng/ros_robot1_ws/src/robot_bringup/config/robot_calibration.yaml",
+            "",
         )
-        self.calibration_file = self.get_parameter("calibration_file").value
+        calibration_value = str(self.get_parameter("calibration_file").value)
+        if calibration_value:
+            self.calibration_file = str(Path(calibration_value).expanduser())
+        else:
+            bringup_share = Path(
+                get_package_share_directory("robot_bringup")
+            )
+            self.calibration_file = str(
+                bringup_share / "config" / "robot_calibration.yaml"
+            )
 
         self.motor_position_deg = {}
         self.last_motor_time = {}

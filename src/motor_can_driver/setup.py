@@ -27,7 +27,9 @@ setup(
     },
     entry_points={
         'console_scripts': [
-        'motor_node = motor_can_driver.motor_node:main',
+            'motor_node = motor_can_driver.motor_node:main',
+            'motor_position_controller = motor_can_driver.motor_position_controller:main',
+            'mock_motor_hardware_node = motor_can_driver.mock_motor_hardware_node:main',
         ],
     },
 )

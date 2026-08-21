@@ -175,7 +175,8 @@ state_estimation:
 
   use_pcc_model: true
   use_imu_correction: true
-  # 当前无直接张力传感器，不宣称松绳检测已生效\n  use_slack_detection: false
+  # 当前无直接张力传感器，不宣称松绳检测已生效
+  use_slack_detection: false
 
 # ==========================
 # PCC 正/逆运动学建模参数
@@ -430,4 +431,3 @@ vision_fusion:
   # 当前旧结构人工测量，仅用于 sanity check，不参与算法：
   # base -> tip Tag center ≈ 0.335 m
   # tip Tag center -> camera ≈ 0.325 m
-

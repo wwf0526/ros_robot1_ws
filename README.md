@@ -1,60 +1,128 @@
-# ROS2 Continuum Robot Control System
+# ROS 2 Dual-section Continuum Robot
 
-本仓库为深腔连续体机器人底层控制系统，主要用于线驱连续体机器人的电机控制、IMU 数据采集、多电机同步控制、零点标定、安全状态检测与后续智能控制算法实验。
+ROS 2 Jazzy control and research workspace for a two-section, six-tendon
+continuum robot. The repository contains the physical motor/IMU drivers,
+calibration-driven PCC model, state and safety estimation, AprilTag fusion,
+QP MPC, and MuJoCo kinematic visualization.
 
-该系统面向深腔狭长空间作业场景，为连续体机器人运动学建模、MPC 闭环控制、强化学习补偿以及 PINNs 物理约束建模提供实机控制与数据采集基础。
+## Fixed physical conventions
 
----
+- Chain order: `base -> section2 -> section1 -> tip`.
+- Section 1 motors: `1, 3, 5`; section 2 motors: `2, 4, 6`.
+- Section 1 PCC slots: `[DL1, DL2, DL3] = [tendon5, tendon3, tendon1]`.
+- Section 2 PCC slots: `[DL1, DL2, DL3] = [tendon4, tendon2, tendon6]`.
+- All geometry, direction and limits come from
+  `robot_bringup/config/robot_calibration.yaml`.
 
-## 1. 项目简介
+## Final motor execution architecture
 
-连续体机器人具有柔性变形、线缆摩擦、结构迟滞、重力影响和模型不确定性等特点，传统解析模型难以完全准确描述其真实运动行为。
+The MS42DDC manufacturer protocol mode 2 is a **relative displacement**
+command. It is not an absolute motor setpoint. MPC and application nodes must
+therefore never publish directly to the raw mode-2 topic.
 
-本项目从底层控制系统出发，搭建了基于 ROS2 的连续体机器人控制框架，实现：
+```mermaid
+flowchart TD
+    A["MPC / homing / manual target"]
+    B["motor_position_controller"]
+    C["motor_node or mock hardware"]
+    D["/motor/state feedback"]
+    A -->|"absolute /motor/position_target"| B
+    B -->|"bounded mode-2 /motor/raw_command_array"| C
+    C --> D
+    D --> B
+```
 
-- 多路伺服电机控制；
-- CAN / SocketCAN 通讯；
-- IMU 姿态数据采集；
-- 多电机同步位置控制；
-- 电机统一回零与预紧；
-- 急停与安全状态检测；
-- 为后续 MPC / RL / PINNs 控制算法提供实验平台。
+The controller starts disabled. Enabling requires complete fresh feedback and,
+for real hardware, a fresh `SafetyState` with `safe_to_control=true`. Target,
+feedback, safety and motion-batch timeouts actively publish stop commands and
+latch a controller fault.
 
----
+## Build
 
-## 2. 系统功能
+```bash
+cd ~/ros_robot1_ws
+source /opt/ros/jazzy/setup.bash
+rosdep install --from-paths src --ignore-src -r -y
+colcon build --symlink-install
+source install/setup.bash
+```
 
-### 已实现功能
+## Closed-loop verification without hardware
 
-- 基于 ROS2 构建机器人底层控制工作空间；
-- 支持多电机 CAN 通讯与位置控制；
-- 支持 IMU 数据采集与 ROS2 话题发布；
-- 支持多电机同步控制指令发布；
-- 支持电机零点标定与回零；
-- 支持线缆预紧控制流程；
-- 支持急停与基础安全状态检测；
-- 支持参数化配置电机、CAN 通道、IMU 串口等硬件信息。
+The default launch uses deterministic mock motors, does not access SocketCAN,
+and still starts disarmed.
 
-### 后续计划
+```bash
+ros2 launch robot_bringup motor_control.launch.py
+```
 
-- 建立线缆长度—弯曲曲率—末端位姿映射模型；
-- 构建连续体机器人 PCC / PoE 运动学模型；
-- 引入电机编码器与 IMU 反馈进行状态估计；
-- 实现 MPC 闭环轨迹跟踪控制；
-- 采集实机运动数据，训练 RL / PINNs 残差补偿模型；
-- 修正线缆摩擦、结构迟滞、重力变形和模型不确定性带来的预测误差。
+Check that six feedback streams and the controller state are present:
 
----
+```bash
+ros2 topic echo /motor/state
+ros2 topic echo /motor/position_control_state
+```
 
-## 3. 系统架构
+Arm the software position controller:
 
-```text
-ros_robot1_ws/
-├── src/
-│   ├── imu_driver/              # IMU 数据采集与解析节点
-│   ├── motor_can_driver/        # 电机 CAN 通讯与控制节点
-│   ├── robot_interfaces/        # 自定义 msg / srv 接口
-│   └── robot_bringup/           # 参数配置与 launch 启动文件
-├── build/
-├── install/
-└── log/
+```bash
+ros2 service call /motor_controller/set_enabled \
+  robot_interfaces/srv/SetMotorControlEnabled "{enable: true}"
+```
+
+Publish a complete absolute target heartbeat. All six motors are required in
+every external target message.
+
+```bash
+ros2 topic pub -r 10 /motor/position_target \
+  robot_interfaces/msg/MotorPositionTargetArray \
+  "{enable: true, source: manual_mock_test, targets: [
+    {motor_id: 1, position_deg: 12.0, max_speed_rad_s: 0.3},
+    {motor_id: 2, position_deg: 12.0, max_speed_rad_s: 0.3},
+    {motor_id: 3, position_deg: 12.0, max_speed_rad_s: 0.3},
+    {motor_id: 4, position_deg: 12.0, max_speed_rad_s: 0.3},
+    {motor_id: 5, position_deg: 12.0, max_speed_rad_s: 0.3},
+    {motor_id: 6, position_deg: 12.0, max_speed_rad_s: 0.3}]}"
+```
+
+Stop the publisher to verify that the 0.5 s target watchdog stops the mock
+motors, disables the controller and latches a fault. Recovery order is:
+
+1. restore feedback and safety;
+2. clear the fault;
+3. explicitly enable the controller;
+4. publish a fresh complete target.
+
+## Real motor execution
+
+Start the IMU, state estimator, vision and safety chain first. Only then start
+the physical motor layer:
+
+```bash
+ros2 launch robot_bringup motor_control.launch.py \
+  use_mock_hardware:=false \
+  require_safety_state:=true \
+  start_enabled:=false
+```
+
+Before enabling, confirm:
+
+- `can0` and `can1` are UP at 1 Mbit/s;
+- all six `/motor/state` messages are fresh;
+- runtime dual-IMU zero is established;
+- `/continuum/safety_state.safe_to_control` is true;
+- the physical emergency stop and software stop path have been tested;
+- tendons are monitored by a person during the first low-speed moves.
+
+The raw topics `/motor/raw_command` and `/motor/raw_command_array` are internal
+execution-layer interfaces. Do not use them for MPC or manual absolute targets.
+
+## Current model boundary
+
+- `qp_mpc_node` now publishes absolute motor targets through the closed-loop
+  execution layer and initializes its command state from encoder feedback.
+- Its current `A` and `B` matrices are still initial linear estimates; `B` must
+  be replaced by identified data before performance claims or unattended real
+  hardware tests.
+- MuJoCo currently uses direct `qpos` updates plus `mj_forward()` and is a
+  kinematic visualization, not a tendon-force or flexible-body dynamics model.

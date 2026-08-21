@@ -9,8 +9,9 @@ from robot_interfaces.msg import (
     ContinuumState,
     ContinuumTarget,
     SafetyState,
-    MotorCommand,
-    MotorCommandArray,
+    MotorPositionTarget,
+    MotorPositionTargetArray,
+    MotorState,
 )
 
 
@@ -68,9 +69,12 @@ class QpMpcNode(Node):
         self.current_state = None
         self.current_target = None
         self.current_safety = None
+        self.motor_feedback_deg = {}
 
-        # MPC维护的当前电机目标角度
+        # MPC维护零点坐标系下的绝对电机目标。
         self.theta_cmd_deg = np.zeros(self.nu)
+        self.theta_cmd_initialized = False
+        self.last_output_enabled = False
 
         # ==========================
         # 4. ROS2 订阅
@@ -96,12 +100,19 @@ class QpMpcNode(Node):
             10,
         )
 
+        self.create_subscription(
+            MotorState,
+            "/motor/state",
+            self.motor_state_callback,
+            50,
+        )
+
         # ==========================
         # 5. ROS2 发布
         # ==========================
         self.command_pub = self.create_publisher(
-            MotorCommandArray,
-            "/motor/command_array",
+            MotorPositionTargetArray,
+            "/motor/position_target",
             10,
         )
 
@@ -126,6 +137,22 @@ class QpMpcNode(Node):
     def safety_callback(self, msg: SafetyState):
         # 保存安全状态
         self.current_safety = msg
+
+    def motor_state_callback(self, msg: MotorState):
+        motor_id = int(msg.motor_id)
+        if 1 <= motor_id <= self.nu:
+            self.motor_feedback_deg[motor_id] = float(msg.position_deg)
+
+    def publish_target_disabled(self):
+        if not self.last_output_enabled:
+            return
+        msg = MotorPositionTargetArray()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.enable = False
+        msg.source = "qp_mpc"
+        self.command_pub.publish(msg)
+        self.last_output_enabled = False
+        self.theta_cmd_initialized = False
 
     def solve_qp(self, x, x_ref):
         """
@@ -189,18 +216,22 @@ class QpMpcNode(Node):
         # 1. 数据完整性检查
         # ==========================
         if self.current_state is None:
+            self.publish_target_disabled()
             return
 
         if self.current_target is None:
+            self.publish_target_disabled()
             return
 
         if self.current_safety is None:
+            self.publish_target_disabled()
             return
 
         # ==========================
         # 2. 目标使能检查
         # ==========================
         if not self.current_target.enable:
+            self.publish_target_disabled()
             return
 
         # ==========================
@@ -210,7 +241,20 @@ class QpMpcNode(Node):
             self.get_logger().warn(
                 f"QP MPC blocked by safety: {self.current_safety.status}"
             )
+            self.publish_target_disabled()
             return
+
+        if len(self.motor_feedback_deg) != self.nu:
+            self.get_logger().warn("QP MPC waiting for all six motor feedback values")
+            self.publish_target_disabled()
+            return
+
+        if not self.theta_cmd_initialized:
+            self.theta_cmd_deg = np.array([
+                self.motor_feedback_deg[motor_id]
+                for motor_id in range(1, self.nu + 1)
+            ], dtype=float)
+            self.theta_cmd_initialized = True
 
         # ==========================
         # 4. 当前状态
@@ -250,21 +294,24 @@ class QpMpcNode(Node):
         # ==========================
         # 8. 生成多电机命令
         # ==========================
-        msg = MotorCommandArray()
-        msg.commands = []
+        msg = MotorPositionTargetArray()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.enable = True
+        msg.source = "qp_mpc"
+        msg.targets = []
 
         for i in range(self.nu):
-            cmd = MotorCommand()
-            cmd.motor_id = i + 1
-            cmd.mode = 2
-            cmd.target_deg = float(self.theta_cmd_deg[i])
-            cmd.speed_rad_s = float(self.default_speed_rad_s)
-            msg.commands.append(cmd)
+            target = MotorPositionTarget()
+            target.motor_id = i + 1
+            target.position_deg = float(self.theta_cmd_deg[i])
+            target.max_speed_rad_s = float(self.default_speed_rad_s)
+            msg.targets.append(target)
 
         # ==========================
         # 9. 发布命令
         # ==========================
         self.command_pub.publish(msg)
+        self.last_output_enabled = True
 
         error = x_ref - x
         self.get_logger().info(
