@@ -56,6 +56,19 @@ and still starts disarmed.
 ros2 launch robot_bringup motor_control.launch.py
 ```
 
+To run the same Mock motor feedback through tendon conversion, the two-section
+PCC model and the real-time MuJoCo window, use the integrated launch instead:
+
+```bash
+python3 tools/validate_mujoco_pcc_integration.py
+ros2 launch robot_bringup motor_pcc_mujoco.launch.py
+```
+
+This desktop mode disables unavailable IMU and vision fusion only. It does not
+bypass the motor-to-tendon conversion or PCC forward kinematics. The viewer
+freezes at its last valid pose if `/continuum/state` becomes stale. See
+`docs/mujoco_pcc_realtime.md` for the complete data flow and troubleshooting.
+
 Check that six feedback streams and the controller state are present:
 
 ```bash

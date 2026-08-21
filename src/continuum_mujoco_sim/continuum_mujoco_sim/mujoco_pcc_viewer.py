@@ -55,12 +55,16 @@ from typing import Dict
 import mujoco
 import mujoco.viewer
 import numpy as np
+import yaml
 
 import rclpy
 from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
 
 from robot_interfaces.msg import ContinuumState
+
+from .generate_mujoco_model import generate_mujoco_xml
+from .pcc_viewer_core import distribute_pcc_section
 
 
 class MujocoPccViewer(Node):
@@ -95,6 +99,9 @@ class MujocoPccViewer(Node):
         # MuJoCo 模型文件名称。
         # 默认从 continuum_mujoco_sim/models/continuum_kinematic.xml 加载。
         self.declare_parameter("model_xml", "continuum_kinematic.xml")
+        self.declare_parameter("regenerate_model", False)
+        self.declare_parameter("calibration_file", "")
+        self.declare_parameter("mesh_file", "")
 
         # 每段在 MuJoCo XML 中离散为多少个盘间单元。
         # 你当前模型是每段 5 个单元：sec2_u1~sec2_u5, sec1_u1~sec1_u5。
@@ -113,13 +120,13 @@ class MujocoPccViewer(Node):
         #
         # False：适合当前阶段。
         #   XML 还是理想长度 0.2925 m，但真实 section2/section1 可能是 0.14/0.20 m。
-        #   此时 qz = (arc_length - xml_length) / n，
+        #   此时以 xml_length 为整段伸缩参考，并按单元长度分配 qz，
         #   可以把理想 XML 显示模型压缩到接近真实弧长。
         #
         # True：适合后续阶段。
         #   如果 MuJoCo XML 已经根据 robot_calibration.yaml 自动生成，
-        #   XML 本身就等于真实 L0，则用 qz = (arc_length - L0) / n，
-        #   零输入直线状态下 qz = 0。
+        #   XML 本身就等于真实 L0，则以 arc_length - L0 为整段伸缩，
+        #   零输入直线状态下所有 qz 都为 0。
         self.declare_parameter("use_state_l0_for_qz", False)
 
         # 弯曲关节和轴向伸缩关节的显示限幅。
@@ -129,12 +136,25 @@ class MujocoPccViewer(Node):
 
         # 是否打印每次接收到的状态，默认关闭，避免刷屏。
         self.declare_parameter("debug_print_state", False)
+        self.declare_parameter("state_timeout_sec", 0.5)
+        self.declare_parameter("viewer_rate_hz", 60.0)
+        self.declare_parameter("camera_distance_m", 0.8)
+        self.declare_parameter("camera_azimuth_deg", 135.0)
+        self.declare_parameter("camera_elevation_deg", -20.0)
+        self.declare_parameter("camera_lookat_z_m", 0.17)
 
         # =====================================================
         # 2. 读取 ROS2 参数
         # =====================================================
         self.state_topic = str(self.get_parameter("state_topic").value)
         self.model_xml = str(self.get_parameter("model_xml").value)
+        self.regenerate_model = bool(
+            self.get_parameter("regenerate_model").value
+        )
+        self.calibration_file = str(
+            self.get_parameter("calibration_file").value
+        )
+        self.mesh_file = str(self.get_parameter("mesh_file").value)
         self.n = int(self.get_parameter("intervals_per_section").value)
 
         self.xml_section_length: Dict[str, float] = {
@@ -147,10 +167,34 @@ class MujocoPccViewer(Node):
         )
         self.bend_limit = float(self.get_parameter("bend_limit_rad").value)
         self.slide_limit = float(self.get_parameter("slide_limit_m").value)
-        self.debug_print_state = bool(self.get_parameter("debug_print_state").value)
+        self.debug_print_state = bool(
+            self.get_parameter("debug_print_state").value
+        )
+        self.state_timeout_sec = float(
+            self.get_parameter("state_timeout_sec").value
+        )
+        self.viewer_rate_hz = float(
+            self.get_parameter("viewer_rate_hz").value
+        )
+        self.camera_distance_m = float(
+            self.get_parameter("camera_distance_m").value
+        )
+        self.camera_azimuth_deg = float(
+            self.get_parameter("camera_azimuth_deg").value
+        )
+        self.camera_elevation_deg = float(
+            self.get_parameter("camera_elevation_deg").value
+        )
+        self.camera_lookat_z_m = float(
+            self.get_parameter("camera_lookat_z_m").value
+        )
 
         if self.n <= 0:
             raise ValueError("intervals_per_section 必须大于 0")
+        if self.state_timeout_sec <= 0.0:
+            raise ValueError("state_timeout_sec 必须大于 0")
+        if self.viewer_rate_hz <= 0.0:
+            raise ValueError("viewer_rate_hz 必须大于 0")
 
         # =====================================================
         # 3. 初始化缓存状态
@@ -178,6 +222,8 @@ class MujocoPccViewer(Node):
         # 用于限制“qz 被限幅”的日志次数，避免运行时刷屏。
         self._clip_warn_count = 0
         self._clip_warn_max = 5
+        self._last_state_time = None
+        self._state_stale_reported = False
 
         # =====================================================
         # 4. 创建 ROS2 订阅器
@@ -199,10 +245,16 @@ class MujocoPccViewer(Node):
         # 1. 文件名，例如 continuum_kinematic.xml；
         # 2. 绝对路径，例如 /home/.../continuum_kinematic.xml。
         model_path = self._resolve_model_path(self.model_xml)
+        if self.regenerate_model:
+            self._regenerate_model(model_path)
+        if not model_path.is_file():
+            raise FileNotFoundError(f"MuJoCo model not found: {model_path}")
 
         self.get_logger().info(f"Loading MuJoCo model: {model_path}")
         self.model = mujoco.MjModel.from_xml_path(str(model_path))
         self.data = mujoco.MjData(self.model)
+        self._validate_model_joints()
+        mujoco.mj_forward(self.model, self.data)
 
         self.get_logger().info(
             "Subscribed to ContinuumState: "
@@ -228,6 +280,66 @@ class MujocoPccViewer(Node):
 
         pkg_share = Path(get_package_share_directory("continuum_mujoco_sim"))
         return pkg_share / "models" / model_xml
+
+    def _regenerate_model(self, model_path: Path) -> None:
+        """Generate MJCF from the active calibration before loading it."""
+
+        calibration_path = Path(self.calibration_file).expanduser()
+        mesh_path = Path(self.mesh_file).expanduser()
+        if not calibration_path.is_file():
+            raise FileNotFoundError(
+                f"Calibration file not found: {calibration_path}"
+            )
+        if not mesh_path.is_file():
+            raise FileNotFoundError(f"MuJoCo mesh not found: {mesh_path}")
+        with calibration_path.open("r", encoding="utf-8") as stream:
+            cfg = yaml.safe_load(stream)
+        generate_mujoco_xml(
+            cfg=cfg,
+            output_xml=model_path,
+            model_name="continuum_kinematic_runtime",
+            mesh_file=str(mesh_path.resolve()),
+        )
+        self.get_logger().info(
+            f"Generated runtime MuJoCo model from: {calibration_path}"
+        )
+
+    def _validate_model_joints(self) -> None:
+        """Fail early when the XML and PCC discretization do not match."""
+
+        missing = []
+        self.segment_length_m = {"sec2": [], "sec1": []}
+        for prefix in ("sec2", "sec1"):
+            for index in range(1, self.n + 1):
+                body_name = f"{prefix}_u{index}"
+                body_id = mujoco.mj_name2id(
+                    self.model,
+                    mujoco.mjtObj.mjOBJ_BODY,
+                    body_name,
+                )
+                if body_id < 0:
+                    missing.append(body_name)
+                else:
+                    length = float(self.model.body_pos[body_id, 2])
+                    if not math.isfinite(length) or length <= 0.0:
+                        raise RuntimeError(
+                            f"MuJoCo body {body_name} has invalid z length"
+                        )
+                    self.segment_length_m[prefix].append(length)
+                for suffix in ("bend_x", "bend_y", "slide_z"):
+                    name = f"{prefix}_u{index}_{suffix}"
+                    joint_id = mujoco.mj_name2id(
+                        self.model,
+                        mujoco.mjtObj.mjOBJ_JOINT,
+                        name,
+                    )
+                    if joint_id < 0:
+                        missing.append(name)
+        if missing:
+            raise RuntimeError(
+                "MuJoCo XML is incompatible with PCC settings; missing "
+                "joints: " + ", ".join(missing)
+            )
 
     # =========================================================
     # ROS2 回调：接收完整连续体状态
@@ -255,6 +367,20 @@ class MujocoPccViewer(Node):
             )
             return
 
+        values = [
+            msg.section2_model_theta_rad,
+            msg.section2_model_phi_rad,
+            msg.section2_model_arc_length_m,
+            msg.section2_model_l0_m,
+            msg.section1_model_theta_rad,
+            msg.section1_model_phi_rad,
+            msg.section1_model_arc_length_m,
+            msg.section1_model_l0_m,
+        ]
+        if not np.isfinite(values).all():
+            self.get_logger().warn("Non-finite PCC state received, ignored")
+            return
+
         # 注意顺序：真实链路是 section2 -> section1。
         # 这里用 sec2 / sec1 是为了与 MuJoCo XML 中的 joint 命名保持一致。
         self.section_state["sec2"] = {
@@ -272,6 +398,10 @@ class MujocoPccViewer(Node):
             "l0": float(msg.section1_model_l0_m),
             "valid": True,
         }
+        self._last_state_time = time.monotonic()
+        if self._state_stale_reported:
+            self.get_logger().info("ContinuumState stream recovered")
+            self._state_stale_reported = False
 
         if self.debug_print_state:
             self.get_logger().info(
@@ -318,8 +448,7 @@ class MujocoPccViewer(Node):
         返回值：
             用于计算 qz 的参考长度。
 
-        计算方式：
-            qz = (arc_length - reference_length) / n
+        返回整段参考长度；各虚拟关节的 qz 会再按实际单元长度分配。
         """
         if self.use_state_l0_for_qz and l0_from_state > 0.0:
             return float(l0_from_state)
@@ -345,15 +474,14 @@ class MujocoPccViewer(Node):
                 - l0：该段真实初始长度，m。
 
         映射逻辑：
-            1. 每段总弯曲角 theta 平均分配到 n 个单元：
-                   unit_theta = theta / n
+            1. 按 XML 中每个盘间单元的实际长度分配总弯曲角。
+               恒曲率下，单元越长，分配到的弯曲角越大。
 
-            2. 根据弯曲方向 phi，把 unit_theta 分解到两个正交铰链：
+            2. 根据弯曲方向 phi，把单元弯曲角分解到两个正交铰链：
                    qx = -unit_theta * sin(phi)
                    qy =  unit_theta * cos(phi)
 
-            3. 轴向伸缩按每个单元平均分配：
-                   qz = (arc_length - reference_length) / n
+            3. 轴向伸缩同样按实际单元长度比例分配。
         """
         theta = float(state["theta"])
         phi = float(state["phi"])
@@ -364,38 +492,44 @@ class MujocoPccViewer(Node):
             self.get_logger().warn(f"{prefix}: non-finite state ignored")
             return
 
-        # 1. 每个离散单元平均分配弯曲角。
-        unit_theta = theta / self.n
-
-        # 2. 将 PCC 的 theta/phi 分解为 MuJoCo 的 bend_x / bend_y。
-        # 这个映射要和你之前的 MuJoCo 建模约定保持一致。
-        qx_raw = -unit_theta * math.sin(phi)
-        qy_raw = unit_theta * math.cos(phi)
-
-        # 3. 计算轴向伸缩。
+        segment_lengths = self.segment_length_m[prefix]
         reference_length = self._get_qz_reference_length(prefix, l0)
-        qz_raw = (arc_length - reference_length) / self.n
-
-        # 4. 安全限幅，防止异常数据导致显示模型飞掉。
-        qx = float(np.clip(qx_raw, -self.bend_limit, self.bend_limit))
-        qy = float(np.clip(qy_raw, -self.bend_limit, self.bend_limit))
-        qz = float(np.clip(qz_raw, -self.slide_limit, self.slide_limit))
-
-        if abs(qz_raw - qz) > 1e-12 and self._clip_warn_count < self._clip_warn_max:
-            self.get_logger().warn(
-                f"{prefix}: slide_z clipped from {qz_raw:.6f} to {qz:.6f}. "
-                "If this is expected, either increase slide_limit_m or regenerate XML "
-                "with real section lengths."
+        try:
+            joint_states = distribute_pcc_section(
+                theta_rad=theta,
+                phi_rad=phi,
+                arc_length_m=arc_length,
+                reference_length_m=reference_length,
+                segment_lengths_m=segment_lengths,
+                bend_limit_rad=self.bend_limit,
+                slide_limit_m=self.slide_limit,
             )
-            self._clip_warn_count += 1
+        except ValueError as exc:
+            self.get_logger().warn(f"{prefix}: PCC mapping ignored: {exc}")
+            return
 
-        # 5. 把同样的 qx/qy/qz 写入该段的所有离散单元。
-        for i in range(1, self.n + 1):
+        # 恒曲率 theta 与轴向变化都按实际长度权重离散。
+        for i, joint_state in enumerate(joint_states, start=1):
+            qx = joint_state.bend_x_rad
+            qy = joint_state.bend_y_rad
+            qz = joint_state.slide_z_m
+            qz_raw = joint_state.raw_slide_z_m
+
+            if (
+                abs(qz_raw - qz) > 1e-12
+                and self._clip_warn_count < self._clip_warn_max
+            ):
+                self.get_logger().warn(
+                    f"{prefix}_u{i}: slide_z clipped from "
+                    f"{qz_raw:.6f} to {qz:.6f}"
+                )
+                self._clip_warn_count += 1
+
             self._set_joint_qpos(f"{prefix}_u{i}_bend_x", qx)
             self._set_joint_qpos(f"{prefix}_u{i}_bend_y", qy)
             self._set_joint_qpos(f"{prefix}_u{i}_slide_z", qz)
 
-    def apply_current_state_to_mujoco(self) -> None:
+    def apply_current_state_to_mujoco(self) -> bool:
         """
         将最近一次接收到的连续体状态应用到 MuJoCo。
 
@@ -403,10 +537,25 @@ class MujocoPccViewer(Node):
             这里不调用 mj_step()，因为当前不是动力学仿真；
             而是直接写 qpos 后调用 mj_forward() 更新几何位置。
         """
+        state_fresh = bool(
+            self._last_state_time is not None
+            and time.monotonic() - self._last_state_time
+            <= self.state_timeout_sec
+        )
+        if not state_fresh:
+            if not self._state_stale_reported:
+                self.get_logger().warn(
+                    "ContinuumState timeout: MuJoCo display is frozen at the "
+                    "last valid PCC pose"
+                )
+                self._state_stale_reported = True
+            return False
+
         self._apply_one_section("sec2", self.section_state["sec2"])
         self._apply_one_section("sec1", self.section_state["sec1"])
 
         mujoco.mj_forward(self.model, self.data)
+        return True
 
 
 def main(args=None) -> None:
@@ -417,22 +566,31 @@ def main(args=None) -> None:
         1. rclpy.spin_once() 处理一次 ROS 回调；
         2. apply_current_state_to_mujoco() 把最新状态写入 MuJoCo；
         3. viewer.sync() 刷新显示窗口；
-        4. sleep 0.01 s，约 100 Hz。
+        4. 根据 viewer_rate_hz 控制窗口刷新频率。
     """
     rclpy.init(args=args)
     node = MujocoPccViewer()
 
-    with mujoco.viewer.launch_passive(node.model, node.data) as viewer:
-        node.get_logger().info("MuJoCo viewer started.")
+    try:
+        with mujoco.viewer.launch_passive(node.model, node.data) as viewer:
+            viewer.cam.distance = node.camera_distance_m
+            viewer.cam.azimuth = node.camera_azimuth_deg
+            viewer.cam.elevation = node.camera_elevation_deg
+            viewer.cam.lookat[:] = [0.0, 0.0, node.camera_lookat_z_m]
+            node.get_logger().info("MuJoCo PCC viewer started")
 
-        while rclpy.ok() and viewer.is_running():
-            rclpy.spin_once(node, timeout_sec=0.0)
-            node.apply_current_state_to_mujoco()
-            viewer.sync()
-            time.sleep(0.01)
-
-    node.destroy_node()
-    rclpy.shutdown()
+            period_sec = 1.0 / node.viewer_rate_hz
+            while rclpy.ok() and viewer.is_running():
+                loop_start = time.monotonic()
+                rclpy.spin_once(node, timeout_sec=0.0)
+                node.apply_current_state_to_mujoco()
+                viewer.sync()
+                remaining = period_sec - (time.monotonic() - loop_start)
+                if remaining > 0.0:
+                    time.sleep(remaining)
+    finally:
+        node.destroy_node()
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

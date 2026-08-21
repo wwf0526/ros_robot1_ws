@@ -8,6 +8,7 @@ from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -56,7 +57,12 @@ def generate_launch_description():
             name="motor_node",
             parameters=[
                 hardware_config,
-                {"require_safety_state": require_safety},
+                {
+                    "require_safety_state": ParameterValue(
+                        require_safety,
+                        value_type=bool,
+                    ),
+                },
             ],
             output="screen",
             condition=UnlessCondition(use_mock),
@@ -69,8 +75,14 @@ def generate_launch_description():
                 controller_config,
                 {
                     "calibration_file": calibration_file,
-                    "require_safety_state": require_safety,
-                    "start_enabled": start_enabled,
+                    "require_safety_state": ParameterValue(
+                        require_safety,
+                        value_type=bool,
+                    ),
+                    "start_enabled": ParameterValue(
+                        start_enabled,
+                        value_type=bool,
+                    ),
                 },
             ],
             output="screen",

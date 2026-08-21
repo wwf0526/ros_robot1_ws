@@ -53,6 +53,10 @@ class StateEstimatorNode(Node):
             "calibration_file",
             "",
         )
+        self.declare_parameter("pcc_only_mode", False)
+        self.pcc_only_mode = bool(
+            self.get_parameter("pcc_only_mode").value
+        )
         calibration_value = str(self.get_parameter("calibration_file").value)
         if calibration_value:
             self.calibration_file = str(Path(calibration_value).expanduser())
@@ -236,6 +240,12 @@ class StateEstimatorNode(Node):
         )
         self.pcc_sections_cfg = pcc_cfg.get("sections", {})
 
+        if self.pcc_only_mode:
+            # Desktop/Mock mode still uses the real motor->tendon->PCC path,
+            # but physical IMU and camera streams do not exist there.
+            self.use_imu_correction = False
+            self.vision_enabled = False
+
         section_imu_map = cfg.get("section_imu_map", {})
         if (
             section_imu_map.get("section1") != "imu1"
@@ -252,6 +262,10 @@ class StateEstimatorNode(Node):
         self.get_logger().info(
             f"Loaded calibration file: {self.calibration_file}"
         )
+        if self.pcc_only_mode:
+            self.get_logger().info(
+                "PCC-only mode active: IMU and vision fusion are disabled"
+            )
 
     def motor_callback(self, msg: MotorState):
         motor_id = int(msg.motor_id)

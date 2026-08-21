@@ -37,6 +37,7 @@ from xml.etree import ElementTree as ET
 import yaml
 
 import rclpy
+from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 
 
@@ -460,20 +461,20 @@ class GenerateMujocoModelNode(Node):
     def __init__(self):
         super().__init__("generate_mujoco_model")
 
+        bringup_share = Path(get_package_share_directory("robot_bringup"))
+        mujoco_share = Path(
+            get_package_share_directory("continuum_mujoco_sim")
+        )
+        generated_dir = Path.home() / ".ros" / "ros_robot1" / "mujoco"
+
         self.declare_parameter(
             "calibration_file",
-            str(
-                Path.home()
-                / "ros_robot1_ws/src/robot_bringup/config/robot_calibration.yaml"
-            ),
+            str(bringup_share / "config" / "robot_calibration.yaml"),
         )
 
         self.declare_parameter(
             "output_xml",
-            str(
-                Path.home()
-                / "ros_robot1_ws/src/continuum_mujoco_sim/models/generated/continuum_kinematic_generated.xml"
-            ),
+            str(generated_dir / "continuum_kinematic_generated.xml"),
         )
 
         self.declare_parameter(
@@ -483,7 +484,7 @@ class GenerateMujocoModelNode(Node):
 
         self.declare_parameter(
             "mesh_file",
-            "../assets/hex_disk.stl",
+            str(mujoco_share / "models" / "assets" / "hex_disk.stl"),
         )
 
         calibration_file = Path(

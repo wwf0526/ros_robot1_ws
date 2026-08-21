@@ -1,0 +1,21 @@
+mujoco_pcc_viewer:
+  ros__parameters:
+    state_topic: /continuum/state
+    intervals_per_section: 5
+
+    # 启动文件会把该参数替换为安装目录中的绝对路径。
+    model_xml: generated/continuum_kinematic_generated.xml
+    use_state_l0_for_qz: true
+    xml_sec2_length_m: 0.14
+    xml_sec1_length_m: 0.20
+
+    bend_limit_rad: 0.6
+    slide_limit_m: 0.03
+    state_timeout_sec: 0.5
+    viewer_rate_hz: 60.0
+    debug_print_state: false
+
+    camera_distance_m: 0.8
+    camera_azimuth_deg: 135.0
+    camera_elevation_deg: -20.0
+    camera_lookat_z_m: 0.17
