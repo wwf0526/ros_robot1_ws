@@ -60,6 +60,7 @@ setup(
             'mujoco_pcc_viewer = continuum_mujoco_sim.mujoco_pcc_viewer:main',
             'pcc_section_demo = continuum_mujoco_sim.pcc_section_demo:main',
             'generate_mujoco_model = continuum_mujoco_sim.generate_mujoco_model:main',
+            'mujoco_nmpc_bridge = continuum_mujoco_sim.mujoco_nmpc_bridge:main',
         ],
     },
 )

@@ -25,6 +25,8 @@ setup(
     entry_points={
         'console_scripts': [
             'qp_mpc_node = continuum_mpc.qp_mpc_node:main',
+            'nmpc_pcc_state_publisher = simulation.nmpc_pcc_state_publisher:main',
+            'nmpc_controller_node = continuum_mpc.nmpc_controller_node:main',
         ],
     },
 )

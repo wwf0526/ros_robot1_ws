@@ -10,6 +10,9 @@
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
   <depend>robot_interfaces</depend>
+  <depend>continuum_pccmodel</depend>
+
+  <exec_depend>python3-yaml</exec_depend>
 
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-scipy</exec_depend>

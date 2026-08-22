@@ -72,6 +72,36 @@ def _make_pcc_transform(kappa: float, theta: float, phi: float, arc_length: floa
     )
 
 
+def section_transform_from_parameters(
+    kappa: float,
+    phi: float,
+    arc_length: float,
+) -> np.ndarray:
+    """Construct a PCC transform at an arbitrary distance along one section.
+
+    This public helper uses the exact transform convention of the main forward
+    kinematics and is used to sample body points for NMPC shape costs and
+    workspace constraints.
+    """
+
+    kappa_value = float(kappa)
+    phi_value = float(phi)
+    length_value = float(arc_length)
+    if not all(
+        math.isfinite(value)
+        for value in (kappa_value, phi_value, length_value)
+    ):
+        raise ValueError("PCC parameters must be finite")
+    if length_value < 0.0:
+        raise ValueError("arc_length cannot be negative")
+    return _make_pcc_transform(
+        kappa=kappa_value,
+        theta=kappa_value * length_value,
+        phi=phi_value,
+        arc_length=length_value,
+    )
+
+
 def section_transform_from_dl(
     dl_m: List[float],
     geometry: PccGeometry,

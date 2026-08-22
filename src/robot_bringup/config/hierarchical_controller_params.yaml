@@ -1,0 +1,48 @@
+# 最终 PCC-NMPC + 局部几何控制器参数。
+# 物理尺寸、电机方向、卷线轮半径和电机绝对限位仍只在
+# robot_calibration.yaml 中维护，本文件只保存控制与求解参数。
+
+hierarchical_mpc_controller:
+  ros__parameters:
+    # NMPC 名义求解频率。局部控制与目标发布将在后续阶段使用更高频率。
+    nmpc_control_rate_hz: 10.0
+    nmpc_horizon_steps: 6
+
+    # 6个预测步分成2个分段常值控制块，降低冷启动求解时间。
+    # 每周期仍只执行展开后控制序列的第一步。
+    nmpc_control_blocks: 2
+
+    # 四个独立速度顺序：
+    # [section2_DL1, section2_DL2, section1_DL1, section1_DL2]
+    nmpc_max_independent_velocity_mm_s: [4.0, 4.0, 4.0, 4.0]
+
+    # 六根物理绳速度顺序：tendon_id 1..6。
+    # 第三根等效绳速度为 -(DL1 + DL2)，因此仍需单独限制六绳速度。
+    nmpc_max_tendon_velocity_mm_s: [6.0, 6.0, 6.0, 6.0, 6.0, 6.0]
+
+    # NMPC预测目标与电机机械限位之间保留的软件裕量。
+    nmpc_motor_limit_margin_deg: 2.0
+    nmpc_minimum_remaining_tendon_length_mm: 10.0
+
+    # 最大曲率必须通过实机安全弯曲试验标定后再启用。
+    # 数组顺序为 [section2, section1]，单位 1/m。
+    nmpc_enable_curvature_constraint: false
+    nmpc_max_curvature_1pm: [8.0, 8.0]
+
+    # 目标跟踪权重。
+    nmpc_tip_position_weight: [200000.0, 200000.0, 200000.0]
+    nmpc_tip_orientation_weight: [40.0, 40.0, 10.0]
+    nmpc_section_shape_weight: [0.2, 0.2, 0.2, 0.2]
+    nmpc_curvature_regularization_weight: [0.002, 0.002]
+    nmpc_terminal_multiplier: 4.0
+
+    # 六根物理绳速度与相邻控制增量的代价。
+    nmpc_tendon_velocity_weight: [0.02, 0.02, 0.02, 0.02, 0.02, 0.02]
+    nmpc_tendon_velocity_delta_weight: [0.08, 0.08, 0.08, 0.08, 0.08, 0.08]
+
+    # SLSQP非线性滚动优化参数。超时或不可行时控制输出必须关闭。
+    nmpc_optimizer_max_iterations: 50
+    nmpc_optimizer_ftol: 1.0e-7
+    nmpc_optimizer_fd_step_mm_s: 1.0e-3
+    nmpc_max_solve_time_sec: 0.25
+    nmpc_feasibility_tolerance: 1.0e-6

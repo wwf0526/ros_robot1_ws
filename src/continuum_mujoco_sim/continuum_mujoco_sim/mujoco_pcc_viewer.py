@@ -98,7 +98,16 @@ class MujocoPccViewer(Node):
 
         # MuJoCo 模型文件名称。
         # 默认从 continuum_mujoco_sim/models/continuum_kinematic.xml 加载。
-        self.declare_parameter("model_xml", "continuum_kinematic.xml")
+        self.declare_parameter(
+            "model_xml",
+            str(
+                Path.home()
+                / ".ros"
+                / "ros_robot1"
+                / "mujoco"
+                / "continuum_kinematic_generated.xml"
+            ),
+        )
         self.declare_parameter("regenerate_model", False)
         self.declare_parameter("calibration_file", "")
         self.declare_parameter("mesh_file", "")
@@ -255,6 +264,29 @@ class MujocoPccViewer(Node):
         self.data = mujoco.MjData(self.model)
         self._validate_model_joints()
         mujoco.mj_forward(self.model, self.data)
+        # ======================================
+        # MuJoCo tip body index
+        # 当前离散模型最后一个连续体单元作为末端
+        # base -> sec2_u1...sec2_u5
+        #      -> sec1_u1...sec1_u5
+        # ======================================
+
+        self.tip_body_id = mujoco.mj_name2id(
+            self.model,
+            mujoco.mjtObj.mjOBJ_BODY,
+            "sec1_u5",
+        )
+
+        if self.tip_body_id < 0:
+            raise RuntimeError(
+                "Cannot find MuJoCo tip body: sec1_u5"
+            )
+
+        self.get_logger().info(
+            f"MuJoCo tip body id={self.tip_body_id}"
+        )
+
+        self.counter = 0
 
         self.get_logger().info(
             "Subscribed to ContinuumState: "
@@ -551,10 +583,41 @@ class MujocoPccViewer(Node):
                 self._state_stale_reported = True
             return False
 
-        self._apply_one_section("sec2", self.section_state["sec2"])
-        self._apply_one_section("sec1", self.section_state["sec1"])
+        self._apply_one_section(
+            "sec2",
+            self.section_state["sec2"]
+        )
 
-        mujoco.mj_forward(self.model, self.data)
+        self._apply_one_section(
+            "sec1",
+            self.section_state["sec1"]
+        )
+
+        mujoco.mj_forward(
+            self.model,
+            self.data
+        )
+
+        # ======================================
+        # 输出MuJoCo末端位置
+        # 用于NMPC-MuJoCo误差验证
+        # ======================================
+
+        if self.counter % 60 == 0:
+
+            tip_position = self.data.xpos[
+                self.tip_body_id
+            ]
+
+            self.get_logger().info(
+                "MuJoCo tip: "
+                f"x={tip_position[0]:.6f}, "
+                f"y={tip_position[1]:.6f}, "
+                f"z={tip_position[2]:.6f}"
+            )
+
+        self.counter += 1
+
         return True
 
 

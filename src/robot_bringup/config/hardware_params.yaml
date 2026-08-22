@@ -30,7 +30,7 @@ motor_node:
     safety_timeout_sec: 0.25
     controller_state_timeout_sec: 0.5
     require_safety_state: true
-    max_relative_command_deg: 5.0
+    max_relative_command_deg: 1.5
     max_speed_rad_s: 1.0
     zero_file: "~/.ros/ros_robot1/zero_offsets.json"
     

@@ -35,11 +35,48 @@ from typing import Dict, List
 from xml.etree import ElementTree as ET
 
 import yaml
+import math
 
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 
+def add_tendon_markers(
+    body,
+    prefix,
+    radius=0.045
+):
+
+    tendon_angles = {
+        1: 300,
+        2: 240,
+        3: 180,
+        4: 120,
+        5: 60,
+        6: 0,
+    }
+
+
+    for tendon_id, angle_deg in tendon_angles.items():
+
+        angle = math.radians(angle_deg)
+
+
+        x = radius * math.cos(angle)
+        y = radius * math.sin(angle)
+
+
+        ET.SubElement(
+            body,
+            "site",
+            {
+                "name": f"{prefix}_tendon_{tendon_id}",
+                "pos": f"{x} {y} 0.006",
+                "size": "0.006",
+                "rgba": "1 0 0 1",
+            },
+        )
+        
 
 def _fmt(value: float) -> str:
     """
@@ -60,6 +97,128 @@ def _list_to_str(values: List[float]) -> str:
     """
     return " ".join(_fmt(v) for v in values)
 
+def _add_coordinate_frame(worldbody: ET.Element):
+    """
+    添加 PCC / 机器人基坐标系显示
+
+    坐标定义：
+        X+ : 红色
+        Y+ : 绿色
+        Z+ : 蓝色
+
+    说明：
+        1. 坐标系原点位于连续体基座中心；
+        2. 在各轴末端增加 site，名称分别为 X / Y / Z；
+        3. MuJoCo viewer 中可开启 site label 查看字母标注。
+    """
+
+    # ==========================
+    # X+ axis
+    # cylinder 默认沿自身局部 z 轴
+    # 要让它沿世界 x 轴，需要绕 y 轴旋转 +90°
+    # ==========================
+    x_body = ET.SubElement(
+        worldbody,
+        "body",
+        {
+            "name": "pcc_axis_x",
+            "pos": "0.06 0 0",
+            "quat": "0.70710678 0 0.70710678 0",
+        },
+    )
+
+    ET.SubElement(
+        x_body,
+        "geom",
+        {
+            "name": "pcc_axis_x_geom",
+            "type": "cylinder",
+            "size": "0.005 0.06",
+            "rgba": "1 0 0 1",
+        },
+    )
+
+    ET.SubElement(
+        worldbody,
+        "site",
+        {
+            "name": "X",
+            "pos": "0.135 0 0",
+            "size": "0.008",
+            "rgba": "1 0 0 1",
+        },
+    )
+
+    # ==========================
+    # Y+ axis
+    # 沿世界 y 轴，需要绕 x 轴旋转 -90°
+    # ==========================
+    y_body = ET.SubElement(
+        worldbody,
+        "body",
+        {
+            "name": "pcc_axis_y",
+            "pos": "0 0.06 0",
+            "quat": "0.70710678 -0.70710678 0 0",
+        },
+    )
+
+    ET.SubElement(
+        y_body,
+        "geom",
+        {
+            "name": "pcc_axis_y_geom",
+            "type": "cylinder",
+            "size": "0.005 0.06",
+            "rgba": "0 1 0 1",
+        },
+    )
+
+    ET.SubElement(
+        worldbody,
+        "site",
+        {
+            "name": "Y",
+            "pos": "0 0.135 0",
+            "size": "0.008",
+            "rgba": "0 1 0 1",
+        },
+    )
+
+    # ==========================
+    # Z+ axis
+    # cylinder 默认就是沿 z 轴
+    # ==========================
+    z_body = ET.SubElement(
+        worldbody,
+        "body",
+        {
+            "name": "pcc_axis_z",
+            "pos": "0 0 0.075",
+        },
+    )
+
+    ET.SubElement(
+        z_body,
+        "geom",
+        {
+            "name": "pcc_axis_z_geom",
+            "type": "cylinder",
+            "size": "0.005 0.075",
+            "rgba": "0 0 1 1",
+        },
+    )
+
+    ET.SubElement(
+        worldbody,
+        "site",
+        {
+            "name": "Z",
+            "pos": "0 0 0.165",
+            "size": "0.008",
+            "rgba": "0 0 1 1",
+        },
+    )
 
 def _get_section_segment_lengths_m(cfg: Dict, section_name: str) -> List[float]:
     """
@@ -225,6 +384,7 @@ def _add_joint_chain_unit(
             "type": "mesh",
             "mesh": "hex_disk",
             "rgba": disk_rgba,
+            "euler": "0 0 11",
         },
     )
 
@@ -345,6 +505,8 @@ def generate_mujoco_xml(
 
     # 世界主体。
     worldbody = ET.SubElement(mujoco, "worldbody")
+
+    _add_coordinate_frame(worldbody)
 
     ET.SubElement(
         worldbody,
